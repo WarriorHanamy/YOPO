@@ -18,14 +18,14 @@ namespace mocka {
 
 class Maps {
 public:
-  typedef struct BasicInfo {
+  struct BasicInfo {
     int sizeX;
     int sizeY;
     int sizeZ;
     int seed;
     double scale;
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud;
-  } BasicInfo;
+  };
 
   BasicInfo getInfo() const;
   void setInfo(const BasicInfo &value);

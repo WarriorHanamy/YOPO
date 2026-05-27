@@ -53,7 +53,7 @@ limit_range(T& value, const T2& limit)
   limit_range(value, -limit, limit);
 }
 
-typedef std::stringstream DebugSS_t;
+using DebugSS_t = std::stringstream;
 } // end of namespace uav_utils
 
 #endif

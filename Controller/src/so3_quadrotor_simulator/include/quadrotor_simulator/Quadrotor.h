@@ -76,7 +76,7 @@ public:
   void step(double dt);
 
   // For internal use, but needs to be public for odeint
-  typedef boost::array<double, 22> InternalState;
+  using InternalState = boost::array<double, 22>;
   void operator()(const Quadrotor::InternalState& x,
                   Quadrotor::InternalState&       dxdt, const double /* t */);
 

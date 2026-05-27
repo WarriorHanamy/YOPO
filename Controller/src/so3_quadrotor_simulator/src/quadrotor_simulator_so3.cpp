@@ -10,12 +10,12 @@
 #include <uav_utils/geometry_utils.h>
 #include "visualization_msgs/Marker.h"
 
-typedef struct _Control
+struct Control
 {
   double rpm[4];
-} Control;
+};
 
-typedef struct _Command
+struct Command
 {
   float force[3];
   float qx, qy, qz, qw;
@@ -24,13 +24,13 @@ typedef struct _Command
   float corrections[3];
   float current_yaw;
   bool  use_external_yaw;
-} Command;
+};
 
-typedef struct _Disturbance
+struct Disturbance
 {
   Eigen::Vector3d f;
   Eigen::Vector3d m;
-} Disturbance;
+};
 
 static Command     command;
 static Disturbance disturbance;

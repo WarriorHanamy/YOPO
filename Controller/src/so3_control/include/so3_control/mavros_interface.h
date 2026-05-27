@@ -45,7 +45,7 @@ public:
 
     ~Mavros_Interface() {}
 
-    typedef struct mavros_state_t
+    struct mavros_state_t
     {
         ros::Time header;
         bool has_armed;
