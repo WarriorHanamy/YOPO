@@ -45,7 +45,7 @@ public:
 
     ~Mavros_Interface() {}
 
-    struct mavros_state_t
+    struct MavrosState
     {
         ros::Time header;
         bool has_armed;
@@ -55,7 +55,7 @@ public:
             has_armed = false;
             offboard_enabled = false;
         }
-        mavros_state_t()
+        MavrosState()
         {
             reset();
         }
@@ -188,7 +188,7 @@ private:
     ros::Subscriber state_sub;
     ros::ServiceClient set_mode_client;
     ros::ServiceClient arm_disarm_client;
-    mavros_state_t _state;
+    MavrosState _state;
 };
 
 #endif
