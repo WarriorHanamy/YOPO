@@ -14,16 +14,16 @@ COPY setup-apt-mirror.sh /tmp/setup-apt-mirror.sh
 RUN chmod +x /tmp/setup-apt-mirror.sh && /tmp/setup-apt-mirror.sh
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    build-essential cmake libpcl-dev libopencv-dev libeigen3-dev libyaml-cpp-dev libomp-dev \
-    && rm -rf /var/lib/apt/lists/*
+  build-essential cmake libpcl-dev libopencv-dev libeigen3-dev libyaml-cpp-dev libomp-dev \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY CMakeLists.txt /src/
 COPY src/           /src/src/
 COPY include/       /src/include/
 
 RUN cmake -B /build -S /src -DCMAKE_BUILD_TYPE=Release \
-    -DCONFIG_FILE=${CONFIG_FILE} -DCUDA_ARCH=${CUDA_ARCH} \
-    && cmake --build /build --target dataset_generator -j$(nproc)
+  -DCONFIG_FILE=${CONFIG_FILE} -DCUDA_ARCH=${CUDA_ARCH} \
+  && cmake --build /build --target dataset_generator -j$(nproc)
 
 # ===== Stage 2: Runtime =====
 FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
@@ -33,8 +33,8 @@ COPY setup-apt-mirror.sh /tmp/setup-apt-mirror.sh
 RUN chmod +x /tmp/setup-apt-mirror.sh && /tmp/setup-apt-mirror.sh
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    libpcl-dev libopencv-dev libyaml-cpp-dev libomp-dev \
-    && rm -rf /var/lib/apt/lists/*
+  libpcl-dev libopencv-dev libyaml-cpp-dev libomp-dev \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
