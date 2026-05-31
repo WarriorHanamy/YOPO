@@ -1,6 +1,6 @@
 # Codebase Documentation
 
-> Auto-generated repository documentation — YOPO (You Only Plan Once)
+> Generated snapshot — may drift from codebase. Update directly when code changes; check for stale content regularly.
 
 ## Overview
 
@@ -23,11 +23,9 @@ YOPO/
 │   ├── policy/            #   Network, dataset, trainer, primitive lattice, solver
 │   │   └── models/        #   ResNet18 backbone + YopoHead
 │   ├── loss/              #   Loss functions: smoothness, safety, guidance, score
-│   ├── control_msg/       #   ROS PositionCommand Python binding
-│   ├── saved/             #   Pre-trained weights (YOPO_1/epoch50.pth)
-│   ├── train_yopo.py      #   Training entry point
-│   ├── test_yopo_ros.py   #   ROS inference node (deployment)
-│   └── yopo_trt_transfer.py # PyTorch→TensorRT conversion
+│   ├── schema.py          #   Pydantic config schema (YOPOConfig)
+│   ├── cli.py             #   CLI entry point: yopo train|trt|visualize|validate
+│   └── saved/             #   Pre-trained weights (YOPO_1/epoch50.pth)
 │
 ├── Controller/            # Quadrotor dynamics + SO(3) attitude controller (C++/ROS)
 │   └── src/
@@ -55,7 +53,9 @@ YOPO/
 │
 ├── docs/                  # Media assets (GIFs, PNGs) for README — no text docs
 ├── PrimitivesAnalysis.md  # Deep technical analysis (541 lines)
+├── AGENTS.md              # Durable agent rules (workspace layout, conventions, safety)
 ├── Makefile               # Docker-based data generation orchestration
+├── pyproject.toml         # Python project metadata + deps (uv/pip)
 ├── README.md              # Project overview + install/test/train instructions
 └── LICENSE                # MIT
 ```
@@ -64,101 +64,43 @@ YOPO/
 
 ---
 
-## Getting Started
-
-### Prerequisites
-
-- **OS**: Ubuntu 20.04 (development), Ubuntu 22.04 (Docker data-gen)
-- **GPU**: CUDA-capable (Jetson Orin/Xavier NX for deployment, RTX 3080 for training)
-- **ROS**: Noetic
-- **Conda**: Python 3.8 environment
-
-### Installation
-
-```bash
-# 1. Python environment
-conda create --name yopo python=3.8
-conda activate yopo
-cd YOPO && pip install -r requirements.txt
-
-# 2. Build Controller (ROS catkin, C++11)
-conda deactivate
-cd Controller && catkin_make
-
-# 3. Build Simulator (ROS catkin, C++17 + CUDA)
-cd Simulator && catkin_make
-```
-
-### Generate Training Data
-
-```bash
-make data   # Builds Docker image (CUDA 12.4.1) + runs dataset generation (~1-2 min, 100k samples)
-```
-
-### Train
-
-```bash
-conda activate yopo
-cd YOPO
-python train_yopo.py                    # ~1 hour on RTX 3080 + i9-12900K
-tensorboard --logdir=./                  # Monitor training
-```
-
-### Test (Simulated)
-
-```bash
-# Terminal 1: Controller
-roslaunch so3_quadrotor_simulator simulator_attitude_control.launch
-
-# Terminal 2: Simulator
-rosrun sensor_simulator sensor_simulator_cuda
-
-# Terminal 3: YOPO planner
-conda activate yopo
-python test_yopo_ros.py --trial=1 --epoch=50
-
-# Terminal 4: Visualization
-rviz -d YOPO/yopo.rviz
-```
-
-### TensorRT Deployment (Real-World)
-
-```bash
-pip install -U nvidia-tensorrt --index-url https://pypi.ngc.nvidia.com
-git clone https://github.com/NVIDIA-AI-IOT/torch2trt && cd torch2trt && python setup.py install
-python yopo_trt_transfer.py --trial=1 --epoch=50
-python test_yopo_ros.py --use_tensorrt=1
-```
-
----
-
 ## Architecture
 
 ### System Data Flow
 
+```plantuml
+@startuml
+left to right direction
+skinparam componentBackgroundColor #lightblue
+
+component "depth image" as DEPTH
+component "YopoNetwork\n(ResNet18 + Head)" as NET
+component "LatticePrimitive\n(15 anchors)" as LATTICE
+component "StateTransform\n(frame conversions)" as ST
+component "Poly5Solver\n(closed-form)" as SOLVER
+component "YOPOLoss\n(smooth+safety+guidance)" as LOSS
+component "AdamW\noptimizer" as OPT
+
+database "dataset/\n.ply + .png + .csv" as DB
+
+DB --> NET : depth image [1,96,160]
+DB --> ST : position + state
+ST --> NET : obs_body [9,3,5]
+LATTICE --> ST : anchor directions
+NET --> ST : endstate_body [9,3,5]
+ST --> SOLVER : boundary conditions
+SOLVER --> LOSS : trajectories
+LOSS --> OPT : gradients
+OPT --> NET : weight update
+@enduml
 ```
-[Depth Camera / Simulator]         [Dataset Generator]            [Trainer / Inference]
-CUDA ray caster                 →  batch_generator.cpp        →  YOPODataset (DataLoader)
-    |                                  |                             |
-    v                                  v                             v
-depth image (32FC1) + odom      depth PNG + pose CSV           YopoNetwork.forward()
-    |                                  |                             |
-    v                                  v                             v
-ROS topics                       dataset/ mount                 15 polynomials
-    |                                                                |  |
-    v                                                                v  v
-test_yopo_ros.py                                            loss_function.py
-    |  |                                                  (smooth + safety + guidance)
-    v  v
-YopoNetwork.inference()                                              |
-    |                                                                v
-    +--> Poly5Solver (closed-form)                          Weight update
-    +--> 50 Hz control loop → PositionCommand
-                   |
-Controller/        v
-SO3Control receives PositionCommand
-→ Quadrotor dynamics → odometry feedback
-```
+
+**Source anchors:**
+- `YOPO/policy/yopo_network.py` — `YopoNetwork.forward()`: depth → ResNet18 feature, concat obs, Conv1x1 → tanh + softplus
+- `YOPO/policy/primitive.py` — `LatticePrimitive` generates 5×3 polar grid of motion primitive anchors
+- `YOPO/policy/state_transform.py` — `StateTransform._pred_to_endstate()`: delta offsets → body-frame end states
+- `YOPO/loss/loss_function.py` — `YOPOLoss.forward()`: smoothness, safety, guidance cost computation
+- `YOPO/policy/yopo_trainer.py` — `YopoTrainer`: AdamW optimizer, DataLoader, TensorBoard/WandB logging
 
 ### Three-Frame Coordinate System
 
@@ -290,135 +232,9 @@ At inference, the 15 primitives are ranked by predicted score; the lowest-score 
 
 ---
 
-## API Reference
+## Reference
 
-YOPO has **no HTTP/REST API**. All interfaces are ROS topics.
-
-### ROS Topics
-
-| Node | Topic | Type | Direction |
-|------|-------|------|-----------|
-| Simulator → YOPO | `/depth_image` | `sensor_msgs/Image` | Subscribe |
-| Simulator → YOPO | `/sim/odom` | `nav_msgs/Odometry` | Subscribe |
-| RVIZ → YOPO | `/move_base_simple/goal` | `geometry_msgs/PoseStamped` | Subscribe |
-| YOPO → Controller | `/so3_control/pos_cmd` | `quadrotor_msgs/PositionCommand` | Publish (50 Hz) |
-| YOPO → RVIZ | `/yopo_net/best_traj_visual` | `sensor_msgs/PointCloud2` | Publish |
-| YOPO → RVIZ | `/yopo_net/lattice_trajs_visual` | `sensor_msgs/PointCloud2` | Publish |
-| YOPO → RVIZ | `/yopo_net/trajs_visual` | `sensor_msgs/PointCloud2` | Publish |
-| Controller → Simulator | `/so3_cmd` | `quadrotor_msgs/SO3Command` | Publish |
-| Controller → PX4 | `/mavros/setpoint_raw/attitude` | `mavros_msgs/AttitudeTarget` | Publish |
-
-### Key ROS Messages
-
-- **`PositionCommand.msg`**: position, velocity, acceleration, yaw, yaw_dot, gains (kx, kv)
-- **`SO3Command.msg`**: force vector, orientation quaternion, attitude gains (kR, kOm)
-- **`PolynomialTrajectory.msg`**: num_segment, coefficients, segment times, start/final yaw
-
-### CLI Arguments (`test_yopo_ros.py`)
-
-```
-python test_yopo_ros.py --trial {N} --epoch {N} [--use_tensorrt {0|1}]
-```
-
----
-
-## Testing
-
-**Status: No automated test infrastructure.**
-
-This is a research prototype. Validation is performed via:
-- TensorBoard training loss curves
-- RViz visual inspection of predicted trajectories
-- Manual flight testing
-
-Specific gaps:
-- No unit tests for Poly5Solver, StateTransform, loss functions, or network components
-- No CI/CD pipeline (no `.github/`, no GitLab CI)
-- No coverage configuration
-- `test_yopo_ros.py` is a deployment node, not a test — it has no assertions
-- Train/validation split exists in YOPODataset but measures model performance, not code correctness
-
----
-
-## Deployment
-
-### Build Systems
-
-| Component | Build System | Standard |
-|-----------|-------------|----------|
-| YOPO (Python) | None (scripts) | Python 3.8 |
-| Controller | catkin_make | C++11 |
-| Simulator | catkin_make | C++17 + CUDA |
-| Data-gen | CMake (Docker) | C++17 + CUDA 12.4.1 |
-
-### Docker (Data Generation Only)
-
-```bash
-make image   # Build yopo-data-gen:latest (multi-stage, nvidia/cuda:12.4.1)
-make data    # Run with --gpus all, mount dataset/
-make clean   # Remove generated data
-make shell   # Interactive debugging
-make help    # Show targets
-```
-
-### Target Hardware
-
-| Platform | Role | Inference |
-|----------|------|-----------|
-| Ubuntu 20.04 + RTX 3080 | Training | ~5 ms (PyTorch) |
-| Jetson Orin NX | Deployment | ~1 ms (TensorRT FP16) |
-| Jetson Xavier NX | Deployment | ~1-5 ms (TensorRT) |
-| RK3566 (1 TOPS NPU) | Experimental | ~20 ms (RKNN INT8) |
-
-### Real-World Deployment Workflow
-
-1. Convert: `python yopo_trt_transfer.py --trial=1 --epoch=50`
-2. Set `use_tensorrt=1` in test script
-3. Change `env: simulation` → `env: 435` (RealSense D435 mm units)
-4. Remap odometry: `~odom` → `/vins_estimator/imu_propagate`
-5. Launch position controller with `plan_from_reference: True`
-6. Configure RealSense to 480×270 (16:9, ~90° FOV)
-
----
-
-## Dependencies
-
-### Python Runtime (requirements.txt)
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| torch | 2.4.1+cu118 | Deep learning framework |
-| torchvision | 0.19.1+cu118 | ResNet backbone |
-| numpy | 1.22.3 | Linear algebra |
-| scipy | 1.10.1 | Rotations, stats, distance transforms |
-| opencv-python | 4.11.0.86 | Depth image I/O, preprocessing |
-| open3d | 0.19.0 | Point cloud, PLY loading |
-| tensorboard | 2.14.0 | Training monitoring |
-| ruamel-yaml | 0.17.21 | Config parsing |
-| rich | 14.0.0 | Progress bars |
-| catkin_pkg, rospkg | - | ROS Python integration |
-
-### C++ Build Dependencies (apt)
-
-```
-libyaml-cpp-dev    # Config parsing (Simulator + data-gen)
-libpcl-dev         # Point Cloud Library (octree, I/O)
-libopencv-dev      # Image representation
-libeigen3-dev      # Linear algebra (all C++ components)
-libomp-dev         # OpenMP parallelism (data-gen)
-```
-
-### ROS Packages (Controller)
-
-- `roscpp`, `nav_msgs`, `sensor_msgs`, `std_msgs`, `tf`, `tf2_ros`, `nodelet`
-- `cv_bridge`, `pcl_ros` (Simulator)
-- Custom: `quadrotor_msgs`, `mavros_msgs`, `uav_utils`, `cmake_utils`
-
-**Note**: `sklearn` is used for dataset splitting but not listed in `requirements.txt` — consider adding it.
-
----
-
-## Domain Glossary
+### Domain Glossary
 
 | Term | Definition |
 |------|------------|
@@ -453,12 +269,13 @@ libomp-dev         # OpenMP parallelism (data-gen)
 | Document | Path | Description |
 |----------|------|-------------|
 | Project README | `README.md` | Overview, install, test, train, TensorRT/RKNN deployment |
+| Agent Rules | `AGENTS.md` | Durable rules: workspace layout, conventions, safety constraints |
 | Technical Deep-Dive | `PrimitivesAnalysis.md` | 541-line analysis of primitives, ray casting, coordinate frames, data flow |
 | Simulator README | `Simulator/src/readme.md` | Build instructions, config walkthrough, performance benchmarks |
 | Controller README | `Controller/src/readme.md` | Build, control modes, pub/sub reference |
-| YOPO README | `YOPO/readme.md` | Short stub about AMP training |
 | Config Reference | `YOPO/config/traj_opt.yaml` | All hyperparameters with inline comments |
 | Simulator Config | `Simulator/src/config/config.yaml` | Sensor and environment parameters |
+| Python Project | `pyproject.toml` | Dependencies, entry points, lint/format rules, pytest config |
 | Makefile | `Makefile` | Docker image/data generation targets |
 | License | `LICENSE` | MIT |
 
@@ -467,7 +284,6 @@ libomp-dev         # OpenMP parallelism (data-gen)
 - No Architecture Decision Records (ADRs)
 - No CONTRIBUTING.md or code of conduct
 - No generated API reference
-- No dataset format specification document
 - No automated test suite or CI configuration
 - No hardware documentation in this checkout (available via GitHub Releases)
 - No tutorials or Jupyter notebooks
