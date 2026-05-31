@@ -1,95 +1,66 @@
-# YOPO — Codebase Documentation
+# Codebase Documentation
 
-> Auto-generated repository documentation
->
-> YOPO (You Only Plan Once) — learning-based one-stage quadrotor motion planner
-> TJU-Aerial-Robotics, Tianjin University · MIT License
-
----
+> Auto-generated repository documentation — YOPO (You Only Plan Once)
 
 ## Overview
 
-YOPO replaces the traditional three-stage autonomous drone planning pipeline (perception → path search → trajectory optimization) with a single convolutional neural network. The network takes a depth image and odometry state, then directly outputs a collision-free, smooth flight trajectory — analogous to how YOLO unified object detection.
+YOPO is a learning-based, one-stage motion planner for aggressive quadrotor autonomous navigation in obstacle-dense environments. It collapses the classical perception→front-end search→back-end optimization pipeline into a single neural network forward pass. The network takes a depth image and vehicle state, predicts 15 candidate trajectory end-states (offsets from fixed angular anchors), scores them via a self-supervised cost function, and selects the cheapest primitive for execution.
 
-**Key innovation:** Instead of imitation learning or reinforcement learning, YOPO backpropagates gradients of analytical trajectory costs (smoothness, safety, guidance) directly into network weights. At inference, the network simultaneously predicts 15 candidate trajectories and their quality scores, selecting the best one without any iterative optimization — hence "You Only Plan Once."
+**Key concept**: Like YOLO for object detection, the planner predicts trajectory offsets and scores from a grid of motion primitive anchors in one shot — no iterative optimization, no online simulation.
 
-**Repository type:** ROS-based polyglot research codebase (Python/PyTorch + C++/ROS + CUDA), not a production system.
+**Paper**: [You Only Plan Once: A Learning-Based One-Stage Planner With Guidance Learning](https://ieeexplore.ieee.org/document/10528860) (IEEE)  
+**V2**: [YOPOv2-Tracker: An End-to-End Agile Tracking and Navigation Framework](https://arxiv.org/html/2505.06923v1)  
+**License**: MIT (TJU-Aerial-Robotics, 2024)
 
 ---
 
 ## Repository Structure
 
-### Architecture Pattern
-
-**ROS polyglot composition** — three independently built subsystems communicate via ROS topics at runtime. Not a monorepo (no shared build), not microservices (tightly coupled via ROS), not a pure monolith (separate build systems).
-
-### Top-Level Directory Map
-
-| Directory              | Purpose                                                        | Language / Build                       |
-| ---------------------- | -------------------------------------------------------------- | -------------------------------------- |
-| `YOPO/`                | Neural planner: network, training, loss, inference, TensorRT   | Python/PyTorch (`pip`)                 |
-| `Controller/`          | Quadrotor dynamics simulator + SO(3) attitude/position control | C++11 + ROS (`catkin_make`)            |
-| `Simulator/`           | CUDA-accelerated depth/LiDAR sensor simulator + random maps    | C++17 + CUDA + ROS (`catkin_make`)     |
-| `docker/data-gen/`     | Standalone dataset generator (no ROS)                          | C++17 + CUDA + Docker + CMake          |
-| `dataset/`             | Generated training data — gitignored                           | Data artifact                          |
-| `docs/`                | README images/GIFs (14 media files)                            | —                                      |
-| `hardware/`            | Drone hardware design files (SolidWorks) — referenced, absent  | —                                      |
-
-### Key Entry Points
-
-| File                                                 | Role                                   |
-| ---------------------------------------------------- | -------------------------------------- |
-| `YOPO/train_yopo.py`                                 | Training entry (`--trial`, `--epoch`)  |
-| `YOPO/test_yopo_ros.py`                              | ROS inference node (`--use_tensorrt`)  |
-| `YOPO/yopo_trt_transfer.py`                          | PyTorch → TensorRT conversion          |
-| `Controller/src/so3_control/src/network_control_node.cpp` | SO(3) controller ROS node              |
-| `Controller/src/so3_quadrotor_simulator/src/dynamics/Quadrotor.cpp` | Rigid-body dynamics model  |
-| `Simulator/src/src/sensor_simulator.cu`              | CUDA depth/LiDAR raycasting kernel     |
-| `docker/data-gen/src/dataset_generator.cpp`          | Offline batch data collector           |
-
-### Python Package Structure (`YOPO/`)
-
 ```
 YOPO/
-├── train_yopo.py              # Training entry
-├── test_yopo_ros.py           # ROS inference node
-├── yopo_trt_transfer.py       # TensorRT conversion
-├── requirements.txt
-├── config/
-│   ├── config.py              # Global Config singleton (loads YAML)
-│   └── traj_opt.yaml          # All hyperparameters
-├── control_msg/
-│   └── _PositionCommand.py    # ROS PositionCommand Python stub
-├── loss/
-│   ├── loss_function.py       # YOPOLoss: composite cost + denormalization
-│   ├── smoothness_loss.py     # Jerk/acceleration smoothness cost
-│   ├── safety_loss.py         # ESDF-based collision cost
-│   └── guidance_loss.py       # Goal-direction guidance cost
-├── policy/
-│   ├── yopo_network.py        # YopoNetwork: backbone + head composition
-│   ├── yopo_trainer.py        # YopoTrainer: gradient-based self-supervised loop
-│   ├── yopo_dataset.py        # YOPODataset: data loading + augmentation
-│   ├── state_transform.py     # Body ↔ Primitive frame transforms
-│   ├── primitive.py           # LatticePrimitive: anchor grid (15 directions)
-│   ├── poly_solver.py         # Poly5Solver: 5th-order polynomial trajectory
-│   └── models/
-│       ├── backbone.py        # ResNet-18/14 depth feature extractor
-│       ├── head.py            # YopoHead: 3-layer 1×1 conv
-│       └── resnet.py          # Full ResNet implementation
-└── saved/
-    └── YOPO_1/epoch50.pth     # Pretrained checkpoint
+├── YOPO/                  # Neural planner: training + inference (Python/PyTorch)
+│   ├── config/            #   Config loader + traj_opt.yaml (all hyperparameters)
+│   ├── policy/            #   Network, dataset, trainer, primitive lattice, solver
+│   │   └── models/        #   ResNet18 backbone + YopoHead
+│   ├── loss/              #   Loss functions: smoothness, safety, guidance, score
+│   ├── control_msg/       #   ROS PositionCommand Python binding
+│   ├── saved/             #   Pre-trained weights (YOPO_1/epoch50.pth)
+│   ├── train_yopo.py      #   Training entry point
+│   ├── test_yopo_ros.py   #   ROS inference node (deployment)
+│   └── yopo_trt_transfer.py # PyTorch→TensorRT conversion
+│
+├── Controller/            # Quadrotor dynamics + SO(3) attitude controller (C++/ROS)
+│   └── src/
+│       ├── so3_control/       # SO(3) geometric controller + network control node
+│       ├── so3_quadrotor_simulator/ # Physics simulation (ODE integration)
+│       └── utils/
+│           ├── quadrotor_msgs/     # Custom ROS messages (PositionCommand, SO3Command, etc.)
+│           ├── mavros_msgs/        # Vendored MAVROS message subset
+│           └── uav_utils/          # Shared UAV utility headers
+│
+├── Simulator/             # Sensor simulator: ray-cast depth + LiDAR (C++/CUDA/ROS)
+│   └── src/
+│       ├── src/               # CPU/GPU ray casters, map generation, Perlin noise
+│       ├── include/           # Headers + CUDA kernels
+│       └── config/            # Simulator config (camera, LiDAR, environment params)
+│
+├── docker/data-gen/       # Standalone CUDA dataset generator (Docker, no ROS)
+│   ├── Dockerfile             # Multi-stage: nvidia/cuda:12.4.1
+│   ├── src/dataset_generator.cpp # Batch ray-casting → PNG + CSV
+│   ├── config/config.yaml     # Generation parameters
+│   └── entrypoint.sh          # Runtime entrypoint
+│
+├── dataset/               # Mount point for generated training data
+│   └── data/                  # {0-9}/img_N.png + pose-N.csv + pointcloud-N.ply
+│
+├── docs/                  # Media assets (GIFs, PNGs) for README — no text docs
+├── PrimitivesAnalysis.md  # Deep technical analysis (541 lines)
+├── Makefile               # Docker-based data generation orchestration
+├── README.md              # Project overview + install/test/train instructions
+└── LICENSE                # MIT
 ```
 
-### File Naming Conventions
-
-| Convention                  | Examples                                                    |
-| --------------------------- | ----------------------------------------------------------- |
-| Python: `snake_case.py`     | `train_yopo.py`, `state_transform.py`, `smoothness_loss.py` |
-| C++: `PascalCase.cpp/.h`    | `Quadrotor.cpp`, `SO3Control.cpp`, `SensorSimulator.cu`     |
-| CUDA: `snake_case.cu/.cuh`  | `sensor_simulator.cu`, `sensor_simulator.cuh`               |
-| ROS msgs: `_PascalCase.py`  | `_PositionCommand.py`, `_SO3Command.py`                     |
-| Config: `snake_case.yaml`   | `traj_opt.yaml`, `config.yaml`, `gains_pelican.yaml`        |
-| Launch: `snake_case.launch` | `simulator_attitude_control.launch`                         |
+**Architecture pattern**: Hybrid monorepo with 3 independent build systems — 2 ROS catkin workspaces (Controller, Simulator) + 1 Python project (YOPO) + 1 Docker container (data-gen). Components communicate via ROS topics at runtime.
 
 ---
 
@@ -97,529 +68,406 @@ YOPO/
 
 ### Prerequisites
 
-- Ubuntu 20.04 (or Jetson Orin/Xavier NX)
-- CUDA toolkit + NVIDIA GPU
-- ROS Noetic
-- Conda
+- **OS**: Ubuntu 20.04 (development), Ubuntu 22.04 (Docker data-gen)
+- **GPU**: CUDA-capable (Jetson Orin/Xavier NX for deployment, RTX 3080 for training)
+- **ROS**: Noetic
+- **Conda**: Python 3.8 environment
 
 ### Installation
 
 ```bash
-git clone --depth 1 git@github.com:TJU-Aerial-Robotics/YOPO.git
-cd YOPO
-
-# Python environment
+# 1. Python environment
 conda create --name yopo python=3.8
 conda activate yopo
-pip install -r YOPO/requirements.txt
+cd YOPO && pip install -r requirements.txt
 
-# Build Controller (C++/ROS)
+# 2. Build Controller (ROS catkin, C++11)
+conda deactivate
 cd Controller && catkin_make
 
-# Build Simulator (C++/CUDA/ROS)
+# 3. Build Simulator (ROS catkin, C++17 + CUDA)
 cd Simulator && catkin_make
+```
 
-# (Optional) TensorRT for edge deployment
-pip install nvidia-tensorrt
+### Generate Training Data
+
+```bash
+make data   # Builds Docker image (CUDA 12.4.1) + runs dataset generation (~1-2 min, 100k samples)
+```
+
+### Train
+
+```bash
+conda activate yopo
+cd YOPO
+python train_yopo.py                    # ~1 hour on RTX 3080 + i9-12900K
+tensorboard --logdir=./                  # Monitor training
+```
+
+### Test (Simulated)
+
+```bash
+# Terminal 1: Controller
+roslaunch so3_quadrotor_simulator simulator_attitude_control.launch
+
+# Terminal 2: Simulator
+rosrun sensor_simulator sensor_simulator_cuda
+
+# Terminal 3: YOPO planner
+conda activate yopo
+python test_yopo_ros.py --trial=1 --epoch=50
+
+# Terminal 4: Visualization
+rviz -d YOPO/yopo.rviz
+```
+
+### TensorRT Deployment (Real-World)
+
+```bash
+pip install -U nvidia-tensorrt --index-url https://pypi.ngc.nvidia.com
 git clone https://github.com/NVIDIA-AI-IOT/torch2trt && cd torch2trt && python setup.py install
-
-# (Optional) Dataset generation via Docker
-make image  # build data-gen Docker image
-make data   # generate dataset (requires --gpus all)
-```
-
-### Runtime Quick Start
-
-1. Launch simulator + controller:
-   ```bash
-   roslaunch so3_quadrotor_simulator simulator_attitude_control.launch
-   ```
-2. Launch YOPO planner:
-   ```bash
-   python test_yopo_ros.py --trial=1 --epoch=50
-   ```
-3. Click "2D Nav Goal" in RViz to set the navigation target.
-
-### Training
-
-```bash
-python train_yopo.py                    # from scratch
-python train_yopo.py --pretrained=1 \   # resume
-    --trial=1 --epoch=50
-```
-
-### Data Generation (Docker)
-
-```bash
-make image CUDA_ARCH=86 CUDA_VER=12.4.1
-make data DATA_DIR=./dataset
+python yopo_trt_transfer.py --trial=1 --epoch=50
+python test_yopo_ros.py --use_tensorrt=1
 ```
 
 ---
 
 ## Architecture
 
-### System Topology (3-node ROS Graph)
+### System Data Flow
 
 ```
-┌──────────────────────┐    /depth_image     ┌──────────────────────┐
-│  sensor_simulator   │ ──────────────────→  │   yopo_net (Python)  │
-│  (C++/CUDA)         │                      │   (PyTorch/TensorRT) │
-│                      │    /sim/odom        │                      │
-│  Pub: /depth_image  │ ←────────────────── │  Pub: /pos_cmd       │──┐
-│       /lidar_points  │                      │       /trajs_visual  │  │
-│       /mock_map      │                      │                      │  │
-└──────────────────────┘                      └──────────────────────┘  │
-                                                                        │
-                                          ┌─────────────────────────────┘
-                                          │  /so3_control/pos_cmd
-                                          ▼
-                               ┌──────────────────────┐
-                               │  network_controller  │
-                               │  (C++/ROS nodelet)   │
-                               │                      │
-                               │  Sub: /pos_cmd       │
-                               │  Pub: so3_cmd        │──┐
-                               └──────────────────────┘  │
-                                                          │ so3_cmd
-                                                          ▼
-                               ┌──────────────────────┐
-                               │  quadrotor_sim_so3   │
-                               │  (C++ dynamics)      │
-                               │                      │
-                               │  Pub: /sim/odom       │
-                               │       /sim/imu        │
-                               └──────────────────────┘
+[Depth Camera / Simulator]         [Dataset Generator]            [Trainer / Inference]
+CUDA ray caster                 →  batch_generator.cpp        →  YOPODataset (DataLoader)
+    |                                  |                             |
+    v                                  v                             v
+depth image (32FC1) + odom      depth PNG + pose CSV           YopoNetwork.forward()
+    |                                  |                             |
+    v                                  v                             v
+ROS topics                       dataset/ mount                 15 polynomials
+    |                                                                |  |
+    v                                                                v  v
+test_yopo_ros.py                                            loss_function.py
+    |  |                                                  (smooth + safety + guidance)
+    v  v
+YopoNetwork.inference()                                              |
+    |                                                                v
+    +--> Poly5Solver (closed-form)                          Weight update
+    +--> 50 Hz control loop → PositionCommand
+                   |
+Controller/        v
+SO3Control receives PositionCommand
+→ Quadrotor dynamics → odometry feedback
 ```
 
-### Data Flow (Inference Pipeline)
+### Three-Frame Coordinate System
+
+| Frame | Axes | Usage |
+|-------|------|-------|
+| **World (W)** | NWU: X=North, Y=West, Z=Up | Absolute position, ESDF queries |
+| **Body (B)** | X=forward, Y=left, Z=up | Odometry input, control output |
+| **Primitive (P_i)** | Z toward anchor direction | Network predicts offsets here |
+
+Transform chain: `obs_world → obs_body (R_wb⁻¹) → obs_primitive (R_bp, per-anchor) → network forward → pred_primitive → pred_body (R_bp) → pred_world (R_wb)`
+
+### Neural Network Architecture
 
 ```
-Depth Image [160×96]            Odometry [pos, vel, quat]
-       │                              │
-       ▼                              ▼
-  ResNet-18 Backbone           normalize + rotate to
-  → 64-channel features          15 primitive frames
-       │                              │
-       └──────── CONCAT ──────────────┘
-                    │
-                    ▼
-             YopoHead (3× Conv1×1)
-                    │
-         ┌─────────┴─────────┐
-         ▼                   ▼
-  15 endstates (tanh)   15 scores (softplus)
-         │                   │
-         │    argmin(score)  │
-         │         │         │
-         └─────────┘         │
-                    │        │
-                    ▼        │
-             Best primitive  │
-                    │        │
-                    ▼        │
-        Poly5Solver(start, end, T)
-                    │
-                    ▼
-        PositionCommand @ 50 Hz
+Inputs:
+  depth [B, 1, 96, 160]  →  Modified ResNet18  →  feature [B, 64, 3, 5]
+  obs   [B, 9, 3, 5]     →  (identity)          →  feature [B, 9, 3, 5]
+                                        │
+                              Concat → [B, 73, 3, 5]
+                                        │
+                              YopoHead: 3× Conv2d(1×1, 256→256→10)
+                                        │
+                              Split:
+                                endstate [B, 9, 3, 5]  (tanh → positions, velocities, accelerations)
+                                score    [B, 1, 3, 5]  (softplus → positive cost estimate)
 ```
 
-### Frame Convention
+The 3×5 output grid maps one-to-one to the 15-primitive lattice (3 vertical × 5 horizontal anchors).
 
-All spatial reasoning resolves to **NWU** (North-West-Up) world frame.
+### Motion Primitive Lattice
 
-| Frame        | Origin      | Axes                          | Purpose                         |
-| ------------ | ----------- | ----------------------------- | ------------------------------- |
-| World (W)    | Inertial    | NWU                           | Absolute position, ESDF map     |
-| Body (B)     | Drone CoM   | X=forward, Y=left, Z=up       | Odometry input, control output  |
-| Primitive (P) | Body origin | Z points toward anchor        | Network predicts offsets here   |
-| Camera (C)   | Camera sensor | Z=forward, X=right, Y=down  | Ray casting, depth image        |
+- **15 primitives**: 5 horizontal × 3 vertical × 1 radial layer
+- **Anchor yaw**: -36°, -18°, 0°, +18°, +36° (18° step)
+- **Anchor pitch**: -20°, 0°, +20° (20° step)
+- **Radius**: 5.0 m
+- **Network offsets**: delta_yaw ±15°, delta_pitch ±15°, radio [0, 10] m
+- **Adjacent primitives overlap by 12° (yaw) / 10° (pitch)** — no coverage gaps
+
+### Training Strategy: Guidance Learning
+
+Unlike imitation learning (requires expert demos) or RL (requires online interaction), YOPO **backpropagates trajectory cost gradients directly through the network**:
+
+1. Network predicts 15 end-states from depth + state
+2. Closed-form polynomial solver computes trajectories
+3. Analytical costs (smoothness + safety + guidance) are computed — fully differentiable
+4. Gradients flow from cost → polynomial → network weights
+5. Score head learns to predict trajectory cost via self-supervised Smooth L1
 
 ---
 
 ## Data Layer
 
-YOPO has **no traditional database** — no SQL/NoSQL, no ORM/ODM, no migration system. Data is file-based.
+### Data Generation Pipeline
+
+The dataset is fully offline and procedurally generated:
+
+```
+[Config YAML] → Docker Build (CUDA + PCL + OpenCV)
+                        │
+                        ▼
+              dataset_generator.cpp
+                        │
+           ┌────────────┼────────────┐
+           ▼            ▼            ▼
+     maps.cpp      sensor_simulator.cu    dataset_generator.cpp
+     (procedural   (CUDA raycast to      (sampling + save)
+      point cloud)  depth image)
+           │            │                  │
+           ▼            ▼                  ▼
+     pointcloud-N.ply  img_N.png      pose-N.csv
+```
+
+### Map Types (`maze_type`)
+
+| Type | Name | Description |
+|------|------|-------------|
+| 1 | Cave | 3D Perlin noise |
+| 2 | Pillars | Random rectangular pillars |
+| 3 | Maze | Recursive division 2D maze |
+| 5 | Forest | Poisson-disc tree placement |
+| 6 | Rooms | Grid of rooms with windows |
+| 7 | Walls | Random oriented walls |
 
 ### Dataset Format
 
 ```
-dataset/
-├── 0/                  # Map_id=0 image directory
-│   ├── img_0.png       # 16-bit PNG depth (160×90)
-│   ├── img_1.png
-│   └── ...
-├── 1/                  # Map_id=1
-├── pose-0.csv          # Pose labels: px,py,pz,qw,qx,qy,qz per row
-├── pose-1.csv
-├── pointcloud-0.ply    # Point cloud map for ESDF construction
-└── pointcloud-1.ply
+dataset/data/
+  pointcloud-0.ply ... pointcloud-9.ply   # Environment point clouds
+  pose-0.csv ... pose-9.csv               # 10,000 pose labels each
+  0/img_0.png ... 9/img_9999.png          # 16-bit depth images (160×90)
 ```
 
-- **Depth images:** 16-bit PNG, `[0, 65535]` encodes `[0, 20m]` range.
-- **Pose CSV:** `px, py, pz, qw, qx, qy, qz` per row, index-aligned with images.
-- **Point clouds:** Binary PLY, converted to ESDF at training start.
-
-### ESDF Map System
-
-The closest component to a "database" — a 3D voxel grid of signed distances to nearest obstacle:
-- Built from `.ply` point clouds via `scipy.ndimage.distance_transform_edt`
-- Voxel resolution: 0.2 m
-- Stored as GPU tensor `[N, 1, D, H, W]`
-- Queried at 30 sample points per trajectory via `F.grid_sample` (bilinear interpolation)
-- Local batch cropping avoids memory blowup when training across multiple maps
-
-### Model Checkpoints
-
-- Format: PyTorch `.pth` (state_dict)
-- Path: `YOPO/saved/YOPO_{trial}/epoch{epoch}.pth`
-- Saved every epoch, with `atexit` crash-safe handler
-- TensorBoard logs in same directory
-- TensorRT path: converted via `torch2trt` to `yopo_trt.pth` (FP16, ~1 ms on Orin NX)
-
-### Data Augmentation (Online)
-
-Performed in `YOPODataset.__getitem__()`:
-- Velocity: log-normal Vx, normal Vy/Vz
-- Acceleration: normal, clipped to `acc_max`
-- Goal: uniformly sampled yaw/pitch within camera FOV; 10% probability nearby goal
-- 90/10 train/validation split per map folder
+- **Depth images**: 16-bit PNG, normalized [0, 65535] → [0, 1], max depth 20 m
+- **Pose CSV**: `px,py,pz,qw,qx,qy,qz` (world-frame camera pose)
+- **Training split**: 90/10 per environment via sklearn
+- **Training-time augmentation**: Velocities, accelerations, and goals are synthetically sampled (not from dataset), allowing each static depth image to be reused with many different motion states.
 
 ---
 
 ## Core Logic
 
-### Motion Primitive Lattice
+### Key Design Decisions
 
-The planner does not regress trajectories directly. It defines **15 fixed anchor directions** (5 horizontal × 3 vertical × 1 radial) that cover the drivable space, analogous to YOLO anchor boxes:
+1. **Closed-form polynomials, no iterative optimization at inference** — the `Coef_inv` matrix gives polynomial coefficients in O(1). All trajectory evaluation is analytic.
 
-| Parameter            | Value                |
-| -------------------- | -------------------- |
-| Horizontal anchors   | 5 (across 90° FOV)   |
-| Vertical anchors     | 3 (across 60° FOV)   |
-| Radial levels        | 1 (at 5.0 m range)   |
-| Total primitives     | **15**               |
-| Delta offset range   | ±15° yaw, ±15° pitch |
+2. **Fixed angular lattice, learnable deltas** — anchor directions are hardcoded; the network only predicts offsets. This constrains the output space and guarantees geometrically sensible end-states.
 
-### YopoNetwork Architecture
+3. **Body-frame inputs, primitive-frame computation** — raw observations are rotated into each primitive's local frame before the network sees them. The network predicts offsets relative to known anchor directions.
 
-```
-Input: depth [B, 1, 96, 160]
-       obs   [B, 9, 3, 5]  (vel+acc+goal in primitive frames)
+4. **Self-supervised score learning** — the network learns to predict which of its own trajectories will have the lowest cost. A form of implicit Q-learning without an explicit value function.
 
-ResNet-18 backbone (modified: single-channel conv1, output 64ch@3×5)
-       +
-Observation (9 channels, identity, no state backbone)
-       ↓
-Concat [B, 73, 3, 5]
-       ↓
-YopoHead: Conv1×1(73→256) → Conv1×1(256→256) → Conv1×1(256→10)
-       ↓
-┌─────────────────────┐
-│ endstate [B, 9, 3, 5]  tanh → normalized delta (pos+vel+acc)
-│ score    [B, 1, 3, 5]  softplus → scalar cost per primitive
-└─────────────────────┘
-```
+5. **Differentiable cost at training, min-score selection at test** — gradients flow from trajectory quality back through the network. At test time, only the cheapest primitive is executed.
 
-- `ResNet-14` variant removes layer4 for faster embedded inference.
+6. **Speed-normalized loss weights** — smoothness scales as speed⁵, acceleration as speed³, safety as 1/speed.
 
-### State Transform Pipeline
+### Loss Functions
 
-1. **Normalize:** velocity by `vel_max` (6 m/s), acceleration by `acc_max` (6 m/s²)
-2. **Body → Primitive frame:** rotate observation through `Rbp` (3×3 per primitive)
-3. **Network forward**
-4. **Primitive → Body frame (decode):**
-   - Position: `delta_yaw` → spherical → Cartesian → rotate by `Rbp`
-   - Velocity/Acceleration: denormalize + rotate by `Rbp`
+| Component | Weight | Formula |
+|-----------|--------|---------|
+| Smoothness (jerk²) | ws=10.0 | dᵀ·R_J·d (quadratic form) |
+| Acceleration² | wa=1.0 | dᵀ·R_A·d (quadratic form) |
+| Safety | wc=1.0 | Σ exp(-(d_i - d₀)/r), d₀=1.2m, r=0.6m |
+| Guidance | wg=0.15 | L1(goal_length, traj_along) + 0.5·∥traj_perp∥₂ |
+| Score | 1.0 | Smooth L1(pred_score, detach(traj_cost)) |
 
-### Trajectory Parameterization (Poly5Solver)
+### Runtime Selection
 
-Each axis is a **5th-order polynomial** with 6 boundary conditions:
-```
-p(t) = A₀ + A₁t + A₂t² + A₃t³ + A₄t⁴ + A₅t⁵
-```
-Boundary: `pos₀,vel₀,acc₀` (odometry) → `pos₁,vel₁,acc₁` (network prediction).
-Coefficient matrix `Coef_inv` (6×6) is precomputed for closed-form solution.
-
-### Training: Gradient-Based Self-Supervision
-
-**No expert demonstrations, no environment interaction, no RL.**
-
-1. Forward pass → 15 endstate predictions + 15 scores
-2. Expand batch: each sample → 15 trajectories (one per primitive)
-3. Transform to world frame
-4. Compute **analytical costs** per trajectory:
-   - **Smoothness:** ∫jerk² dt (weight 10.0, scaled by v⁵)
-   - **Acceleration:** ∫acc² dt (weight 1.0, scaled by v³)
-   - **Safety:** ∫exp(-(d-1.2)/0.6) dt via ESDF query
-   - **Guidance:** L1 projection onto goal direction (weight 0.15)
-5. **Score loss:** `smooth_l1_loss(score_pred, cost_detach)` — network learns to predict its own cost
-6. **Trajectory loss:** mean of weighted costs across all primitives
-7. Backward → AdamW optimizer
-
-### Yaw Calculation
-
-Blended: `yaw = atan2(vel_dir + weight × goal_dir)`, weight proportional to yaw error. Limited by `max_yaw_rate = 0.5 rad/s`.
+At inference, the 15 primitives are ranked by predicted score; the lowest-score (cheapest) primitive is selected and its polynomial trajectory is executed at 50 Hz. Re-planning occurs when the segment time (~1.67 s) expires and a new depth image arrives.
 
 ---
 
-## Interface Layer (APIs & Routes)
+## API Reference
 
-**No web API, no GraphQL, no WebSocket.** Communication is entirely via ROS topics/services.
+YOPO has **no HTTP/REST API**. All interfaces are ROS topics.
 
 ### ROS Topics
 
-| Topic                            | Type                              | Direction             | Rate    | Purpose                        |
-| -------------------------------- | --------------------------------- | --------------------- | ------- | ------------------------------ |
-| `/sim/odom`                      | `nav_msgs/Odometry`               | sim → planner, ctrl   | 100 Hz  | Drone state                    |
-| `/sim/imu`                       | `sensor_msgs/Imu`                 | sim → controller      | 100 Hz  | IMU data                       |
-| `/depth_image`                   | `sensor_msgs/Image` (32FC1)       | sim → planner         | 33 Hz   | Depth frame                    |
-| `/lidar_points`                  | `sensor_msgs/PointCloud2`         | sim                   | 10 Hz   | LiDAR output                   |
-| `/mock_map`                      | `sensor_msgs/PointCloud2`         | sim → RViz            | 1 Hz    | Map visualization              |
-| `/so3_control/pos_cmd`           | `quadrotor_msgs/PositionCommand`  | planner → controller  | 50 Hz   | Position/velocity/acc setpoint |
-| `so3_cmd`                        | `quadrotor_msgs/SO3Command`       | controller → sim      | 50 Hz   | Force + attitude target        |
-| `/move_base_simple/goal`         | `geometry_msgs/PoseStamped`       | RViz → planner        | on-click | User navigation goal           |
-| `/force_disturbance`             | `geometry_msgs/Vector3`           | external → sim        | on-demand | Wind disturbance test          |
-| `/moment_disturbance`            | `geometry_msgs/Vector3`           | external → sim        | on-demand | Moment disturbance             |
-| `/yopo_net/trajs_visual`         | `sensor_msgs/PointCloud2`         | planner → RViz        | 33 Hz   | All 15 trajectories (colored)  |
-| `/yopo_net/best_traj_visual`     | `sensor_msgs/PointCloud2`         | planner → RViz        | 33 Hz   | Selected trajectory            |
-| `/yopo_net/lattice_trajs_visual` | `sensor_msgs/PointCloud2`         | planner → RViz        | 33 Hz   | Anchor lattice visualization   |
+| Node | Topic | Type | Direction |
+|------|-------|------|-----------|
+| Simulator → YOPO | `/depth_image` | `sensor_msgs/Image` | Subscribe |
+| Simulator → YOPO | `/sim/odom` | `nav_msgs/Odometry` | Subscribe |
+| RVIZ → YOPO | `/move_base_simple/goal` | `geometry_msgs/PoseStamped` | Subscribe |
+| YOPO → Controller | `/so3_control/pos_cmd` | `quadrotor_msgs/PositionCommand` | Publish (50 Hz) |
+| YOPO → RVIZ | `/yopo_net/best_traj_visual` | `sensor_msgs/PointCloud2` | Publish |
+| YOPO → RVIZ | `/yopo_net/lattice_trajs_visual` | `sensor_msgs/PointCloud2` | Publish |
+| YOPO → RVIZ | `/yopo_net/trajs_visual` | `sensor_msgs/PointCloud2` | Publish |
+| Controller → Simulator | `/so3_cmd` | `quadrotor_msgs/SO3Command` | Publish |
+| Controller → PX4 | `/mavros/setpoint_raw/attitude` | `mavros_msgs/AttitudeTarget` | Publish |
 
-### ROS Services
+### Key ROS Messages
 
-| Service                                   | Provider           | Purpose                         |
-| ----------------------------------------- | ------------------ | ------------------------------- |
-| `/network_controller_node/takeoff_land`   | network_controller | Arm/takeoff or land/disarm      |
+- **`PositionCommand.msg`**: position, velocity, acceleration, yaw, yaw_dot, gains (kx, kv)
+- **`SO3Command.msg`**: force vector, orientation quaternion, attitude gains (kR, kOm)
+- **`PolynomialTrajectory.msg`**: num_segment, coefficients, segment times, start/final yaw
 
-### CLI Entry Points
+### CLI Arguments (`test_yopo_ros.py`)
 
-| Script                    | Arguments                                          |
-| ------------------------- | -------------------------------------------------- |
-| `YOPO/train_yopo.py`      | `--pretrained`, `--trial`, `--epoch`               |
-| `YOPO/test_yopo_ros.py`   | `--trial`, `--epoch`, `--use_tensorrt`, `--verbose`, `--visualize` |
-| `YOPO/yopo_trt_transfer.py` | `--trial`, `--epoch`, `--dir`                    |
-
-### Authentication
-
-**None.** Local ROS network only, no auth/encryption.
+```
+python test_yopo_ros.py --trial {N} --epoch {N} [--use_tensorrt {0|1}]
+```
 
 ---
 
 ## Testing
 
-### Status: Research-Grade (Minimal)
+**Status: No automated test infrastructure.**
 
-YOPO has **near-zero automated test coverage**. This is typical for academic robotics code — validation is performed empirically through training curves (TensorBoard), simulation visualization (RViz), and physical flight tests.
+This is a research prototype. Validation is performed via:
+- TensorBoard training loss curves
+- RViz visual inspection of predicted trajectories
+- Manual flight testing
 
-### Existing Tests
-
-| File                                                          | Framework    | Content                                      |
-| ------------------------------------------------------------- | ------------ | -------------------------------------------- |
-| `Controller/src/utils/uav_utils/src/uav_utils_test.cpp`       | Google Test  | Geometry utils: rotation, skew, angle round-trips (7 test cases) |
-| `Controller/.../ode/libs/numeric/odeint/test/*.cpp`           | Boost.Test   | Vendored ODE solver tests (third-party)      |
-| `Controller/.../so3_quadrotor_simulator/src/test_dynamics.cpp`| Manual smoke | PD controller behavior benchmark (no assertions) |
-| `Simulator/src/src/test_simulator.cpp`                        | Manual smoke | CPU simulator smoke test                     |
-| `Simulator/src/src/test_simulator_cuda.cpp`                   | Manual smoke | CUDA simulator smoke test                    |
-
-### What's Missing
-
-- No `pytest`/`unittest` tests for the Python planner (core innovation)
-- No unit tests for loss functions, state transforms, or polynomial solver
-- No integration tests for ROS nodes
-- No mocking framework (no `unittest.mock`, no `pytest-mock`, no Google Mock)
-- No CI pipeline (no `.github/workflows/`, no `.gitlab-ci.yml`)
-- No code coverage tooling (no `gcov`, no `coverage.py`, no `.coveragerc`)
-- `catkin_add_nosetests(test)` is commented out in `uav_utils/CMakeLists.txt`
+Specific gaps:
+- No unit tests for Poly5Solver, StateTransform, loss functions, or network components
+- No CI/CD pipeline (no `.github/`, no GitLab CI)
+- No coverage configuration
+- `test_yopo_ros.py` is a deployment node, not a test — it has no assertions
+- Train/validation split exists in YOPODataset but measures model performance, not code correctness
 
 ---
 
 ## Deployment
 
-### CI/CD: None
+### Build Systems
 
-No automated pipelines. Build, test, and deployment are entirely manual.
+| Component | Build System | Standard |
+|-----------|-------------|----------|
+| YOPO (Python) | None (scripts) | Python 3.8 |
+| Controller | catkin_make | C++11 |
+| Simulator | catkin_make | C++17 + CUDA |
+| Data-gen | CMake (Docker) | C++17 + CUDA 12.4.1 |
 
-### Docker
+### Docker (Data Generation Only)
 
-**Single image** for offline dataset generation only (not for the planner or ROS stack):
+```bash
+make image   # Build yopo-data-gen:latest (multi-stage, nvidia/cuda:12.4.1)
+make data    # Run with --gpus all, mount dataset/
+make clean   # Remove generated data
+make shell   # Interactive debugging
+make help    # Show targets
+```
 
-| Artifact                     | Location                     | Purpose                            |
-| ---------------------------- | ---------------------------- | ---------------------------------- |
-| Multi-stage Dockerfile       | `docker/data-gen/Dockerfile` | Builder + runtime, CUDA 12.4.1     |
-| Entrypoint                   | `docker/data-gen/entrypoint.sh` | Rewrites save_path → runs generator |
-| Mirror setup                 | `docker/data-gen/setup-apt-mirror.sh` | APT mirror for China |
+### Target Hardware
 
-No `docker-compose.yml`.
+| Platform | Role | Inference |
+|----------|------|-----------|
+| Ubuntu 20.04 + RTX 3080 | Training | ~5 ms (PyTorch) |
+| Jetson Orin NX | Deployment | ~1 ms (TensorRT FP16) |
+| Jetson Xavier NX | Deployment | ~1-5 ms (TensorRT) |
+| RK3566 (1 TOPS NPU) | Experimental | ~20 ms (RKNN INT8) |
 
-### Makefile (Operational Interface)
+### Real-World Deployment Workflow
 
-| Target   | Description                      |
-| -------- | -------------------------------- |
-| `image`  | Build data-gen Docker image      |
-| `data`   | Generate dataset (needs GPU)     |
-| `clean`  | Remove generated datasets        |
-| `shell`  | Debug container shell            |
-| `help`   | Print all targets                |
-
-### Edge Deployment
-
-- **TensorRT (FP16):** ~1 ms inference on NVIDIA Orin NX
-- **RKNN (INT8):** ~20 ms on RK3566 NPU (1 TOPS)
-- **PyTorch native:** <5 ms (ResNet-18), 1-2 ms (ResNet-14)
-
-### Monitoring
-
-- TensorBoard for training loss curves
-- ROS log files with `log_plot.py` post-processing
-- No structured logging, no metrics infrastructure
-- No Kubernetes, no Terraform, no cloud configs
+1. Convert: `python yopo_trt_transfer.py --trial=1 --epoch=50`
+2. Set `use_tensorrt=1` in test script
+3. Change `env: simulation` → `env: 435` (RealSense D435 mm units)
+4. Remap odometry: `~odom` → `/vins_estimator/imu_propagate`
+5. Launch position controller with `plan_from_reference: True`
+6. Configure RealSense to 480×270 (16:9, ~90° FOV)
 
 ---
 
 ## Dependencies
 
-### Python (YOPO/)
+### Python Runtime (requirements.txt)
 
-**File:** `YOPO/requirements.txt`
+| Package | Version | Purpose |
+|---------|---------|---------|
+| torch | 2.4.1+cu118 | Deep learning framework |
+| torchvision | 0.19.1+cu118 | ResNet backbone |
+| numpy | 1.22.3 | Linear algebra |
+| scipy | 1.10.1 | Rotations, stats, distance transforms |
+| opencv-python | 4.11.0.86 | Depth image I/O, preprocessing |
+| open3d | 0.19.0 | Point cloud, PLY loading |
+| tensorboard | 2.14.0 | Training monitoring |
+| ruamel-yaml | 0.17.21 | Config parsing |
+| rich | 14.0.0 | Progress bars |
+| catkin_pkg, rospkg | - | ROS Python integration |
 
-| Package            | Version      | Purpose                                                  |
-| ------------------ | ------------ | -------------------------------------------------------- |
-| `torch`            | 2.4.1+cu118  | Neural network + autograd                                |
-| `torchvision`      | 0.19.1+cu118 | ResNet definitions                                       |
-| `opencv-python`    | 4.11.0       | Depth image resize, NaN inpainting                       |
-| `scipy`            | 1.10.1       | Rotation transforms, `distance_transform_edt`            |
-| `ruamel-yaml`      | 0.17.21      | YAML config loading                                      |
-| `numpy`            | 1.22.3       | Numerical operations                                     |
-| `tensorboard`      | 2.14.0       | Training visualization                                   |
-| `open3d`           | 0.19.0       | Point cloud I/O for ESDF maps                            |
-| `rich`             | 14.0.0       | CLI progress bars                                        |
+### C++ Build Dependencies (apt)
 
-Extra index: `https://download.pytorch.org/whl/cu118`
+```
+libyaml-cpp-dev    # Config parsing (Simulator + data-gen)
+libpcl-dev         # Point Cloud Library (octree, I/O)
+libopencv-dev      # Image representation
+libeigen3-dev      # Linear algebra (all C++ components)
+libomp-dev         # OpenMP parallelism (data-gen)
+```
 
-**Optional (not in requirements.txt):**
-- `torch2trt` (from source) — TensorRT conversion
-- `nvidia-tensorrt` — TensorRT runtime
+### ROS Packages (Controller)
 
-### C++/ROS (Controller)
+- `roscpp`, `nav_msgs`, `sensor_msgs`, `std_msgs`, `tf`, `tf2_ros`, `nodelet`
+- `cv_bridge`, `pcl_ros` (Simulator)
+- Custom: `quadrotor_msgs`, `mavros_msgs`, `uav_utils`, `cmake_utils`
 
-- **Build:** `catkin_make`, C++11
-- **ROS packages:** `roscpp`, `nav_msgs`, `geometry_msgs`, `sensor_msgs`, `tf`, `tf2_ros`, `nodelet`, `cv_bridge`
-- **Libraries:** Eigen3, Armadillo
-- **Vendored:** Boost odeint (~200 header files, in-tree)
-
-### C++/CUDA (Simulator)
-
-- **Build:** `catkin_make`, C++17 + CUDA
-- **Libraries:** Eigen3, PCL, OpenCV, yaml-cpp, OpenMP
-
-### Docker Data Generator
-
-- **Base:** `nvidia/cuda:12.4.1-devel-ubuntu22.04` (build), `-runtime-` (runtime)
-- **Libraries:** CMake, PCL, OpenCV, Eigen3, yaml-cpp, OpenMP
-
-### No Lock Files
-
-No `poetry.lock`, `Pipfile.lock`, `yarn.lock`, or `package-lock.json`. Dependencies are pinned inline in `requirements.txt`.
-
-### CUDA Version Inconsistency
-
-PyTorch targets **CUDA 11.8** (`cu118`), while Docker uses **CUDA 12.4.1**. Both work with the same driver via forward compatibility — but this is fragile.
+**Note**: `sklearn` is used for dataset splitting but not listed in `requirements.txt` — consider adding it.
 
 ---
 
 ## Domain Glossary
 
-### Core Concepts
-
-| Term               | Definition                                                                                              |
-| ------------------ | ------------------------------------------------------------------------------------------------------- |
-| **YOPO**           | You Only Plan Once — one-stage motion planner                                                           |
-| **Motion Primitive** | One of 15 candidate 5th-order polynomial trajectories                                                  |
-| **Primitive Anchor** | Fixed spherical direction forming a 5×3×1 angular lattice                                              |
-| **Delta Yaw/Pitch**  | Per-primitive offset (±15°) predicted by network, added to anchor direction                            |
-| **Poly5Solver**       | Closed-form 5th-order polynomial coefficient solver from boundary conditions                           |
-| **ESDF**              | Euclidean Signed Distance Field — 3D voxel grid of distance to nearest obstacle                       |
-| **NWU**               | North-West-Up inertial coordinate frame                                                                |
-| **Rbp**               | Rotation matrix from Primitive frame to Body frame                                                     |
-| **PositionCommand**   | ROS message: position + velocity + acceleration + yaw + yaw_dot + trajectory status                   |
-| **Score**             | Network-predicted scalar cost per primitive; `argmin(score)` selects best trajectory at inference      |
-
-### Loss Functions
-
-| Loss             | Formula / Description                                                 | Weight |
-| ---------------- | --------------------------------------------------------------------- | ------ |
-| **Smoothness**   | ∫jerk² dt over trajectory, denormalized by `vel_scale⁵`               | 10.0   |
-| **Acceleration** | ∫acc² dt, denormalized by `vel_scale³`                                | 1.0    |
-| **Safety**       | `exp(-(d - d₀) / r)` with d₀=1.2m, r=0.6m, sampled at 30 points     | 1.0    |
-| **Guidance**     | L1 of trajectory projection onto goal direction + 0.5× perpendicular | 0.15   |
-
-### Key Constants
-
-| Constant             | Value       | Meaning                               |
-| -------------------- | ----------- | ------------------------------------- |
-| `vel_max_train`      | 6.0 m/s     | Max training velocity                 |
-| `acc_max_train`      | 6.0 m/s²    | Max training acceleration             |
-| `radio_range`        | 5.0 m       | Primitive radial reach                |
-| `segment_time`       | ~1.667 s    | 2×radio_range/vel_max                 |
-| `d₀` (safety margin) | 1.2 m       | Safe obstacle clearance               |
-| `r` (decay)          | 0.6 m       | Safety cost sharpness                 |
-| `voxel_size`         | 0.2 m       | ESDF resolution                       |
-| `control_dt`         | 0.02 s      | 50 Hz control loop                    |
-| `depth_resolution`   | 160×96      | Network input size                    |
-| `horizon_num`        | 5           | Primitive grid columns                |
-| `vertical_num`       | 3           | Primitive grid rows                   |
-| `radio_num`          | 1           | Primitive grid radial levels          |
-| `traj_num`           | 15          | Total primitives                      |
-| `observation_dim`    | 9           | vel(3)+acc(3)+goal(3) in body frame  |
-| `output_dim`         | 10          | pos(3)+vel(3)+acc(3)+score per primitive |
-
-### Frame Suffix Conventions
-
-| Suffix | Meaning                                   | Example          |
-| ------ | ----------------------------------------- | ---------------- |
-| `_b`   | Body frame                                | `vel_b`, `goal_b`  |
-| `_w`   | World frame (NWU)                         | `pos_w`, `vel_w`   |
-| `_p`   | Primitive frame                           | `end_vel_p`        |
-| `_c`   | Camera frame                              | `vel_c`            |
-| `Rbp`  | Rotation Primitive→Body                   | `lattice_Rbp_list` |
+| Term | Definition |
+|------|------------|
+| **YOPO** | You Only Plan Once — one-stage motion planner (analogous to YOLO) |
+| **Motion Primitive** | A candidate trajectory defined by anchor direction + network-predicted offsets |
+| **Primitive Anchor** | Fixed angular direction in the 15-element spherical lattice (5 horizontal × 3 vertical) |
+| **Anchor Lattice** | Deterministic angular grid: yaw ∈ {-36°, -18°, 0°, +18°, +36°}, pitch ∈ {-20°, 0°, +20°} |
+| **delta_yaw / delta_pitch** | Network-predicted angular offsets from anchor directions (±15° max) |
+| **radio** | Network-predicted end-position distance along anchor ray [0, 10] m |
+| **Poly5Solver** | Closed-form 5th-order polynomial solver mapping boundary conditions → coefficients |
+| **endstate** | 9-dim vector: (pos_x, pos_y, pos_z, vel_x, vel_y, vel_z, acc_x, acc_y, acc_z) at trajectory endpoint |
+| **ESDF / SDF** | (Euclidean) Signed Distance Field — voxel grid storing distance to nearest obstacle |
+| **Guidance Learning** | Training via direct backpropagation of trajectory cost gradients (no expert demos, no RL) |
+| **Score Loss** | Self-supervised: network learns to predict its own trajectory cost |
+| **d₀ (d0)** | Safe clearance distance = 1.2 m |
+| **r** | Safety cost exponential decay rate = 0.6 m |
+| **vel_max_train / acc_max_train** | Training velocity/acceleration bounds (6.0 m/s, 6.0 m/s²) |
+| **Control dt** | 50 Hz control loop = 0.02 s |
+| **Segment Time** | ~1.67 s per trajectory (2 × radio_range / vel_max_train) |
+| **Body Frame (B)** | Drone-centric: X=forward, Y=left, Z=up |
+| **World Frame (W)** | NWU: X=North, Y=West, Z=Up |
+| **Primitive Frame (P_i)** | Per-anchor frame with Z pointing toward anchor direction |
+| **SO(3)** | 3D rotation group; SO3Control = geometric attitude controller |
+| **HGDO** | High-Gain Disturbance Observer — compensates external forces (wind, etc.) |
+| **plan_from_reference** | Controller mode: use previous step's desired state vs. instantaneous odometry |
+| **env** | Depth format selector: `simulation` (meters, 32FC1) vs `435` (mm, 16UC1 for RealSense D435) |
 
 ---
 
 ## Documentation Index
 
-### Existing Documentation
+| Document | Path | Description |
+|----------|------|-------------|
+| Project README | `README.md` | Overview, install, test, train, TensorRT/RKNN deployment |
+| Technical Deep-Dive | `PrimitivesAnalysis.md` | 541-line analysis of primitives, ray casting, coordinate frames, data flow |
+| Simulator README | `Simulator/src/readme.md` | Build instructions, config walkthrough, performance benchmarks |
+| Controller README | `Controller/src/readme.md` | Build, control modes, pub/sub reference |
+| YOPO README | `YOPO/readme.md` | Short stub about AMP training |
+| Config Reference | `YOPO/config/traj_opt.yaml` | All hyperparameters with inline comments |
+| Simulator Config | `Simulator/src/config/config.yaml` | Sensor and environment parameters |
+| Makefile | `Makefile` | Docker image/data generation targets |
+| License | `LICENSE` | MIT |
 
-| File                                           | Lines | Quality     | Content                                    |
-| ---------------------------------------------- | ----- | ----------- | ------------------------------------------ |
-| `README.md`                                    | 228   | Good        | Project overview, install, test steps      |
-| `PrimitivesAnalysis.md`                        | 541   | Excellent   | Deep technical analysis of primitive system |
-| `Simulator/src/readme.md`                      | 109   | Good        | Simulator build/run/config reference        |
-| `Controller/src/readme.md`                     | 35    | Adequate    | Controller build + rosservice commands     |
-| `YOPO/readme.md`                               | 5     | Poor        | Placeholder only                            |
-| `YOPO/config/traj_opt.yaml`                    | 52    | Good        | Well-commented parameter reference          |
-| `Simulator/src/config/config.yaml`             | 87    | Good        | Well-commented simulator parameters         |
-| `docker/data-gen/config/config.yaml`           | 87    | Good        | Mirror of simulator config                  |
-| `Controller/src/so3_control/config/gains*.yaml` | 3 files | Adequate   | PID/attitude control gains                 |
+### Known Documentation Gaps
 
-### Documentation Gaps
-
-- **No API reference** — no Sphinx or auto-generated docs
-- **No ADRs** — no architecture decision records
-- **No contributing guide** — no `CONTRIBUTING.md`
-- **No changelog** — no version history
-- **No C++ Doxygen** — Controller and Simulator have no annotated headers
-- **No testing documentation** — no test running instructions
-- **No security policy** — no `SECURITY.md`
-- **Missing hardware files** — `hardware/` directory and `hardware_list.pdf` referenced but absent
-
----
-
-## License
-
-MIT License, 2024 — TJU-Aerial-Robotics, Tianjin University
-
-**Papers:**
-- YOPO: You Only Plan Once (RA-L 2024)
-- YOPOv2-Tracker: End-to-end agile tracking from perception to action
-
-BibTeX available in `README.md`.
+- No Architecture Decision Records (ADRs)
+- No CONTRIBUTING.md or code of conduct
+- No generated API reference
+- No dataset format specification document
+- No automated test suite or CI configuration
+- No hardware documentation in this checkout (available via GitHub Releases)
+- No tutorials or Jupyter notebooks
