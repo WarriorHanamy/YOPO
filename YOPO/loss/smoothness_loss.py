@@ -1,10 +1,10 @@
-import torch.nn as nn
 import torch as th
+import torch.nn as nn
 
 
 class SmoothnessLoss(nn.Module):
     def __init__(self, RJ, RA):
-        super(SmoothnessLoss, self).__init__()
+        super().__init__()
         self._RJ = RJ
         self._RA = RA
 
@@ -24,8 +24,16 @@ class SmoothnessLoss(nn.Module):
         dx, dy, dz = D_all[:, 0].unsqueeze(2), D_all[:, 1].unsqueeze(2), D_all[:, 2].unsqueeze(2)
 
         # Compute smoothness loss: dxᵀ R dx + ...
-        jerk_smooth = dx.transpose(1, 2) @ RJ @ dx + dy.transpose(1, 2) @ RJ @ dy + dz.transpose(1, 2) @ RJ @ dz
+        jerk_smooth = (
+            dx.transpose(1, 2) @ RJ @ dx
+            + dy.transpose(1, 2) @ RJ @ dy
+            + dz.transpose(1, 2) @ RJ @ dz
+        )
 
-        accel_smooth = dx.transpose(1, 2) @ RA @ dx + dy.transpose(1, 2) @ RA @ dy + dz.transpose(1, 2) @ RA @ dz
+        accel_smooth = (
+            dx.transpose(1, 2) @ RA @ dx
+            + dy.transpose(1, 2) @ RA @ dy
+            + dz.transpose(1, 2) @ RA @ dz
+        )
 
         return jerk_smooth.squeeze(), accel_smooth.squeeze()

@@ -1,19 +1,20 @@
-import torch
 import numpy as np
-from config.config import cfg
-from policy.primitive import LatticePrimitive
+import torch
+
+from ..schema import config
+from .primitive import LatticePrimitive
 
 
 class StateTransform:
     def __init__(self):
         self.lattice_primitive = LatticePrimitive.get_instance()
-        self.goal_length = cfg['goal_length']
+        self.goal_length = config.goal_length
 
     def pred_to_endstate(self, endstate_pred: torch.Tensor) -> torch.Tensor:
         """
-            Transform the predicted state to the body frame (Original prediction → Primitive frame → Body frame).
-            endstate_pred: [batch; px py pz vx vy vz ax ay az; primitive_v; primitive_h]
-            :return [batch; px py pz vx vy vz ax ay az; primitive_v; primitive_h] in body frame
+        Transform the predicted state to the body frame (Original prediction → Primitive frame → Body frame).
+        endstate_pred: [batch; px py pz vx vy vz ax ay az; primitive_v; primitive_h]
+        :return [batch; px py pz vx vy vz ax ay az; primitive_v; primitive_h] in body frame
         """
         B, V, H = endstate_pred.shape[0], endstate_pred.shape[2], endstate_pred.shape[3]
 
@@ -50,11 +51,13 @@ class StateTransform:
         endstate = endstate.permute(0, 2, 1).reshape(B, 9, V, H)  # [B, 9, 3, 5]
         return endstate
 
-    def pred_to_endstate_cpu(self, endstate_pred: np.ndarray, lattice_id: torch.Tensor) -> np.ndarray:
+    def pred_to_endstate_cpu(
+        self, endstate_pred: np.ndarray, lattice_id: torch.Tensor
+    ) -> np.ndarray:
         """
-            Used during test:
-            Numpy version of pred_to_endstate() on CPU (used in test, x10 times faster than torch on CUDA)
-            :return [B; px py pz vx vy vz ax ay az] in body frame
+        Used during test:
+        Numpy version of pred_to_endstate() on CPU (used in test, x10 times faster than torch on CUDA)
+        :return [B; px py pz vx vy vz ax ay az] in body frame
         """
         delta_yaw = endstate_pred[:, 0] * self.lattice_primitive.yaw_diff
         delta_pitch = endstate_pred[:, 1] * self.lattice_primitive.pitch_diff
@@ -76,12 +79,11 @@ class StateTransform:
 
         return np.concatenate((endstate_p, endstate_vb, endstate_ab), axis=1)
 
-
     def prepare_input(self, obs):
         """
-            Transform the observation to the primitive frame (Body frame → Primitive frame → Body frame).
-            obs: [batch; vx, vy, yz, ax, ay, az, gx, gy, gz] in body frame
-            :return [batch; vx, vy, yz, ax, ay, az, gx, gy, gz; primitive_v; primitive_h] in primitive frame
+        Transform the observation to the primitive frame (Body frame → Primitive frame → Body frame).
+        obs: [batch; vx, vy, yz, ax, ay, az, gx, gy, gz] in body frame
+        :return [batch; vx, vy, yz, ax, ay, az, gx, gy, gz; primitive_v; primitive_h] in primitive frame
         """
         B, N = obs.shape[0], self.lattice_primitive.traj_num
 
@@ -99,7 +101,12 @@ class StateTransform:
 
         transformed_flat = transformed.view(B, N, 9)  # [B, N, 9]
         out = transformed_flat.permute(0, 2, 1).contiguous()  # [B, 9, N]
-        out = out.view(B, 9, self.lattice_primitive.vertical_num, self.lattice_primitive.horizon_num)  # [B, 9, V, H]
+        out = out.view(
+            B,
+            9,
+            self.lattice_primitive.vertical_num,
+            self.lattice_primitive.horizon_num,
+        )  # [B, 9, V, H]
         return out
 
     def unnormalize_obs(self, vel_acc):

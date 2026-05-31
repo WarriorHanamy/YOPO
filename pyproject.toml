@@ -1,0 +1,70 @@
+[project]
+name = "yopo"
+version = "0.1.0"
+description = "YOPO: Learning-based trajectory optimization planner"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "torch>=2.4.1",
+  "torchaudio>=2.4.1",
+  "torchvision>=0.19.1",
+  "opencv-python>=4.11",
+  "scipy>=1.10",
+  "scikit-build>=0.18",
+  "ruamel-yaml>=0.17.21",
+  "numpy>=1.22",
+  "tensorboard>=2.14",
+  "open3d>=0.19",
+  "rich>=14.0",
+  "empy>=4.2",
+  "wandb>=0.19",
+  "scikit-learn",
+  "pydantic>=2",
+]
+
+# pip install -U nvidia-tensorrt --index-url https://pypi.ngc.nvidia.com
+# pip install https://github.com/NVIDIA-AI-IOT/torch2trt (for `yopo trt`)
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.3.0",
+    "pytest>=9.0.0",
+    "pyright>=1.1.408",
+    "ruff==0.15.4",
+]
+
+[project.scripts]
+yopo = "YOPO.cli:main"
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["YOPO*"]
+
+[tool.setuptools.package-data]
+YOPO = ["config/*.yaml"]
+
+
+[tool.ruff]
+line-length = 99
+target-version = "py312"
+indent-width = 4
+exclude = ["deps", "Simulator", "Controller"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E402", "F841", "E501"]
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 120
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+norecursedirs = ["Simulator", "Controller", "docker", "dataset"]

@@ -1,10 +1,12 @@
 import math
+
 import torch as th
 import torch.nn as nn
-from config.config import cfg
-from loss.safety_loss import SafetyLoss
-from loss.smoothness_loss import SmoothnessLoss
-from loss.guidance_loss import GuidanceLoss
+
+from ..schema import config
+from .guidance_loss import GuidanceLoss
+from .safety_loss import SafetyLoss
+from .smoothness_loss import SmoothnessLoss
 
 
 class YOPOLoss(nn.Module):
@@ -15,9 +17,9 @@ class YOPOLoss(nn.Module):
         dp: decision parameters
         df: fixed parameters
         """
-        super(YOPOLoss, self).__init__()
-        self.sgm_time = cfg["sgm_time"]
-        self.device = th.device("cuda" if th.cuda.is_available() else "cpu")
+        super().__init__()
+        self.sgm_time = config.sgm_time
+        self.device = th.device('cuda' if th.cuda.is_available() else 'cpu')
         self._C, self._B, self._L, self._RJ, self._RA = self.qp_generation()
         self._RJ = self._RJ.to(self.device)
         self._RA = self._RA.to(self.device)
@@ -26,11 +28,11 @@ class YOPOLoss(nn.Module):
         self.smoothness_loss = SmoothnessLoss(self._RJ, self._RA)
         self.safety_loss = SafetyLoss(self._L)
         self.goal_loss = GuidanceLoss()
-        print("------ Actual Loss ------")
-        print(f"| {'smooth':<12} = {self.smoothness_weight:6.4f} |")
-        print(f"| {'safety':<12} = {self.safety_weight:6.4f} |")
-        print(f"| {'goal':<12} = {self.goal_weight:6.4f} |")
-        print("-------------------------")
+        print('------ Actual Loss ------')
+        print(f'| {"smooth":<12} = {self.smoothness_weight:6.4f} |')
+        print(f'| {"safety":<12} = {self.safety_weight:6.4f} |')
+        print(f'| {"goal":<12} = {self.goal_weight:6.4f} |')
+        print('-------------------------')
 
     def qp_generation(self):
         # 论文中的映射矩阵
@@ -38,19 +40,32 @@ class YOPOLoss(nn.Module):
         for i in range(3):
             A[2 * i, i] = math.factorial(i)
             for j in range(i, 6):
-                A[2 * i + 1, j] = math.factorial(j) / math.factorial(j - i) * (self.sgm_time ** (j - i))
+                A[2 * i + 1, j] = (
+                    math.factorial(j) / math.factorial(j - i) * (self.sgm_time ** (j - i))
+                )
 
         # H海森矩阵，对应Jerk
         H = th.zeros((6, 6))
         for i in range(3, 6):
             for j in range(3, 6):
-                H[i, j] = i * (i - 1) * (i - 2) * j * (j - 1) * (j - 2) / (i + j - 5) * (self.sgm_time ** (i + j - 5))
+                H[i, j] = (
+                    i
+                    * (i - 1)
+                    * (i - 2)
+                    * j
+                    * (j - 1)
+                    * (j - 2)
+                    / (i + j - 5)
+                    * (self.sgm_time ** (i + j - 5))
+                )
 
         # Q海森矩阵，对应Accel
         Q = th.zeros((6, 6))
         for i in range(2, 6):
             for j in range(2, 6):
-                Q[i, j] = (i * (i - 1)) * (j * (j - 1)) / (i + j - 3) * (self.sgm_time ** (i + j - 3))
+                Q[i, j] = (
+                    (i * (i - 1)) * (j * (j - 1)) / (i + j - 3) * (self.sgm_time ** (i + j - 3))
+                )
 
         return self.stack_opt_dep(A, H, Q)
 
@@ -82,11 +97,11 @@ class YOPOLoss(nn.Module):
         goal cost:       projection of the trajectory onto goal direction.
                          Independent of speed.
         """
-        vel_scale = cfg["vel_max_train"] / 1.0
-        self.smoothness_weight = cfg["ws"] / vel_scale ** 5
-        self.accele_weight = cfg["wa"] / vel_scale ** 3
-        self.safety_weight = cfg["wc"]
-        self.goal_weight = cfg["wg"]
+        vel_scale = config.vel_max_train / 1.0
+        self.smoothness_weight = config.cost_weights.ws / vel_scale**5
+        self.accele_weight = config.cost_weights.wa / vel_scale**3
+        self.safety_weight = config.cost_weights.wc
+        self.goal_weight = config.cost_weights.wg
 
     def forward(self, state, prediction, goal, map_id):
         """
@@ -108,4 +123,9 @@ class YOPOLoss(nn.Module):
         safety_cost = self.safety_loss(Df, Dp, map_id)
         goal_cost = self.goal_loss(Df, Dp, goal)
 
-        return self.smoothness_weight * smoothness_cost, self.safety_weight * safety_cost, self.goal_weight * goal_cost, self.accele_weight * acceleration_cost
+        return (
+            self.smoothness_weight * smoothness_cost,
+            self.safety_weight * safety_cost,
+            self.goal_weight * goal_cost,
+            self.accele_weight * acceleration_cost,
+        )

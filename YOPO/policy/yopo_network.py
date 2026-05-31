@@ -5,23 +5,22 @@ forward, prediction, pre-processing, post-processing
 
 import torch
 from torch import nn
-import numpy as np
-from policy.models.backbone import YopoBackbone
-from policy.models.head import YopoHead
-from policy.state_transform import *
+
+from .models.backbone import YopoBackbone
+from .models.head import YopoHead
+from .state_transform import StateTransform
 
 
 class YopoNetwork(nn.Module):
-
     def __init__(
-            self,
-            observation_dim=9,  # 9: v_xyz, a_xyz, goal_xyz
-            output_dim=10,  # 10: x_pva, y_pva, z_pva, score
-            hidden_state=64,
+        self,
+        observation_dim=9,  # 9: v_xyz, a_xyz, goal_xyz
+        output_dim=10,  # 10: x_pva, y_pva, z_pva, score
+        hidden_state=64,
     ):
-        super(YopoNetwork, self).__init__()
+        super().__init__()
         self.state_transform = StateTransform()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.image_backbone = YopoBackbone(hidden_state)
         self.state_backbone = nn.Sequential()
@@ -29,7 +28,7 @@ class YopoNetwork(nn.Module):
 
     def forward(self, depth: torch.Tensor, obs: torch.Tensor) -> torch.Tensor:
         """
-            forward propagation of neural network
+        forward propagation of neural network
         """
         depth_feature = self.image_backbone(depth)
         obs_feature = self.state_backbone(obs)
@@ -41,12 +40,12 @@ class YopoNetwork(nn.Module):
 
     def inference(self, depth: torch.Tensor, obs: torch.Tensor) -> torch.Tensor:
         """
-            For network training:
-            (1) normalize the input state and transform to primitive frame
-            (2) forward propagation
-            (3) convert the prediction to endstate in body frame.
-            obs: current state in the body frame.
-            return: end state in the body frame
+        For network training:
+        (1) normalize the input state and transform to primitive frame
+        (2) forward propagation
+        (3) convert the prediction to endstate in body frame.
+        obs: current state in the body frame.
+        return: end state in the body frame
         """
         obs = self.state_transform.normalize_obs(obs)
         obs = self.state_transform.prepare_input(obs)
@@ -55,4 +54,4 @@ class YopoNetwork(nn.Module):
         return endstate, score_pred
 
     def print_grad(self, grad):
-        print("grad of hook: ", grad)
+        print('grad of hook: ', grad)

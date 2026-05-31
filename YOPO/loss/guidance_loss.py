@@ -1,13 +1,13 @@
 import torch.nn as nn
-import torch as th
 import torch.nn.functional as F
-from config.config import cfg
+
+from ..schema import config
 
 
 class GuidanceLoss(nn.Module):
     def __init__(self):
-        super(GuidanceLoss, self).__init__()
-        self.goal_length = cfg['goal_length']
+        super().__init__()
+        self.goal_length = config.goal_length
         self.vel_dir_weight = 0  # 5
 
     def forward(self, Df, Dp, goal):
@@ -73,13 +73,13 @@ class GuidanceLoss(nn.Module):
         perp_diff = traj_perp.norm(dim=1)  # [B]
 
         # distance weighting (reduce perpendicular constraint, allow lateral exploration)
-        perp_weight = 0.5   # the given weight is trained with perp_weight = 0, for higher speed in large-scale scenario
+        perp_weight = 0.5  # the given weight is trained with perp_weight = 0, for higher speed in large-scale scenario
         similarity_loss = parallel_diff + perp_weight * perp_diff
         return similarity_loss
 
     def derivative_similarity_loss(self, derivative, goal_dir):
         """
-            Constrain the velocity direction toward the goal
+        Constrain the velocity direction toward the goal
         """
         goal_dir_norm = goal_dir / (goal_dir.norm(dim=1, keepdim=True) + 1e-8)  # [B, 3]
         derivative_norm = derivative / (derivative.norm(dim=1, keepdim=True) + 1e-8)  # [B, 3]
