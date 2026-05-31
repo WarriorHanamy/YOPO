@@ -1,0 +1,106 @@
+@startuml
+!theme plain
+skinparam state {
+  BackgroundColor White
+  BorderColor Black
+}
+
+' =================
+' NetworkControl (C++)
+' =================
+
+state "NetworkControl" as NC {
+  state "UNINITIALIZED\n(state_init_=false)" as NC_INIT
+  state "ODOM_RECEIVED\n(state_init_=true,\nref_valid_=false,\nctrl_valid_=false)" as NC_ODOM
+  state "TAKEOFF_IN_PROGRESS\n(takeoff_land_thread)" as NC_TAKEOFF
+  state "HOVER\n(ctrl_valid_=true,\nposition_cmd_init_=false)" as NC_HOVER
+  state "FOLLOWING_TRAJECTORY\n(position_cmd_init_=true,\nctrl_valid_=true)" as NC_TRAJ
+  state "LANDING_IN_PROGRESS\n(land_vel = -0.4 m/s)" as NC_LAND
+  state "DISARMED\n(ctrl_valid_=false)" as NC_DISARM
+
+  [*] --> NC_INIT : ros::init
+  NC_INIT --> NC_ODOM : odom_callback() (state_init_=true)
+  NC_ODOM --> NC_TAKEOFF : 起飞服务或 simulateTakeoff() 线程
+  NC_TAKEOFF --> NC_TAKEOFF : 斜坡 des_pos_.z += 0.8*dt\n直到 >= takeoff_altitude
+  NC_TAKEOFF --> NC_HOVER : ctrl_valid_ = true; "起飞完成！"
+  NC_HOVER --> NC_TRAJ : network_cmd_callback() (position_cmd_init_=true)
+  NC_TRAJ --> NC_TRAJ : 每个 PositionCommand: HGDO -> SO3 命令
+  NC_TRAJ --> NC_HOVER : timerCallback (无新命令时悬停)
+  NC_HOVER --> NC_LAND : 降落服务(takeoff=false)
+  NC_TRAJ --> NC_LAND : 降落服务(takeoff=false)
+  NC_LAND --> NC_LAND : 斜坡 des_pos_.z -= 0.4*dt\n直到 |z| < 0.1 && |vel_z| < 1
+  NC_LAND --> NC_DISARM : arm_disarm_vehicle(false)
+  NC_DISARM --> [*] : 节点关闭
+}
+
+' =================
+' SO3ControlNodelet (C++)
+' =================
+
+state "SO3ControlNodelet" as SCN {
+  state "INIT (onInit)" as SCN_INIT
+  state "ODOM_OK (cur_odom_init_=true)" as SCN_ODOM
+  state "CMD_RECEIVED (position_cmd_init_=true)" as SCN_CMD
+  state "PUBLISH_LOOP" as SCN_PUB
+
+  [*] --> SCN_INIT : nodelet load
+  SCN_INIT --> SCN_ODOM : 首次 odom_callback
+  SCN_ODOM --> SCN_PUB : 若 init_z_ > -9999 则悬停
+  SCN_ODOM --> SCN_CMD : position_cmd_callback
+  SCN_CMD --> SCN_PUB : publishSO3Command()
+  SCN_PUB --> SCN_ODOM : 下次 odom_callback (无新 cmd 则重发)
+}
+
+' =================
+' YopoTrainer (Python)
+' =================
+
+state "YopoTrainer" as TR {
+  state "SETUP\n(加载 checkpoint 或 从头开始)" as TR_SETUP
+  state "TRAIN_EPOCH\n(policy.train())" as TR_TRAIN
+  state "EVAL_EPOCH\n(@torch.inference_mode())" as TR_EVAL
+  state "SAVE_CHECKPOINT" as TR_SAVE
+
+  [*] --> TR_SETUP : YopoTrainer.__init__
+  TR_SETUP --> TR_TRAIN : train(epochs)
+  TR_TRAIN --> TR_TRAIN : _train_one_epoch (逐 batch 循环)
+  TR_TRAIN --> TR_EVAL : epoch 结束
+  TR_EVAL --> TR_SAVE : 若触发 save_interval
+  TR_SAVE --> TR_TRAIN : 下一 epoch
+  TR_EVAL --> TR_TRAIN : 下一 epoch (不保存)
+  TR_TRAIN --> [*] : 所有 epoch 完成 (ctrl+C 时 atexit 保存)
+}
+
+' =================
+' dataset_generator (C++/CUDA)
+' =================
+
+state "dataset_generator" as DG {
+  state "PARSE_CONFIG (YAML)" as DG_CFG
+  state "CREATE_ENV\n(env_num x: 生成随机地图)" as DG_ENV
+  state "BUILD_GRIDMAP\n(CUDA 占用栅格)" as DG_GRID
+  state "COLLECT_SAMPLES\n(image_num x: 随机姿态 -> 光线投射 -> 保存)" as DG_SAMP
+  state "SAVE_PLY+CSV" as DG_SAVE
+
+  [*] --> DG_CFG
+  DG_CFG --> DG_ENV : for map_i in 0..env_num-1
+  DG_ENV --> DG_GRID : Maps::generate(type) -> 点云
+  DG_GRID --> DG_COLLECT : GPU 上的 GridMap
+  DG_COLLECT --> DG_COLLECT : for image_i in 0..image_num-1\n采样姿态并调用 cameraRaycastKernel
+  DG_COLLECT --> DG_SAVE : 写入姿态 CSV + 过滤后 PLY
+  DG_SAVE --> DG_ENV : 下一地图
+  DG_ENV --> [*] : 所有 env 完成
+}
+
+state "DG_COLLECT" as DG_COLLECT
+
+@enduml
+```
+
+**Source anchors:**
+- `Controller/src/so3_control/include/so3_control/NetworkControl.h` — 所有状态布尔值: state_init_, ref_valid_, ctrl_valid_, position_cmd_init_
+- `Controller/src/so3_control/src/NetworkControl.cpp` — 起飞/降落线程, odom_callback, timerCallback, network_cmd_callback
+- `Controller/src/so3_control/src/so3_control_nodelet.cpp` — onInit, odom_callback (回退悬停), position_cmd_callback
+- `YOPO/policy/yopo_trainer.py` — YopoTrainer, 训练/验证 epochs, atexit 保存, checkpoint 加载
+- `docker/data-gen/src/dataset_generator.cpp` — env_num x image_num 外循环, 进度条
+- `docker/data-gen/src/sensor_simulator.cu` — CUDA 内核启动与同步

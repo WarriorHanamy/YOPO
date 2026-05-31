@@ -7,7 +7,7 @@
 - `Simulator/`        — ROS catkin workspace (C++/CUDA sensor simulator)
 - `docker/data-gen/`  — Docker-based offline data generation (CUDA, no ROS)
 - `dataset/`          — Training data mount point (gitignored, never commit)
-- `docs/`             — Media assets (GIFs, PNGs) — no text documentation
+- `docs/`             — Media assets (GIFs, PNGs) + architecture diagrams (PlantUML *.puml)
 - `tests/`            — pytest scaffolded, tests not yet written
 
 ## Naming Conventions
@@ -41,9 +41,7 @@
 
 ## Code Style (enforced by pre-commit)
 
-- Ruff: `line-length = 99`, `indent-width = 4`, `quote-style = "single"`.
-- Lint rules selected: `E`, `F`, `I`, `UP`. Ignored: `E402`, `F841`, `E501`.
-- Target Python: 3.12.
+- Ruff configured in `pyproject.toml` (line-length=99, indent-width=4, quote-style=single).
 - License header required on all `.py` files.
 
 ## Agent Behavior Constraints
@@ -52,13 +50,6 @@
 - Before catkin_make: source `/opt/ros/noetic/setup.bash`.
 - TensorRT: requires manual `pip install nvidia-tensorrt` from NGC + `torch2trt` from GitHub.
 - Conda is legacy; use `uv` for all Python environment management.
-
-## What Belongs Elsewhere
-
-- Architecture details, data flow, coordinate frames → `CODEBASE.md`
-- Specific command examples → `README.md` or CLI `--help`
-- Package version numbers → `pyproject.toml`
-- ROS topic names / message types → launch files and `CODEBASE.md`
 
 ## Artifact Contracts
 

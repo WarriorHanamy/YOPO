@@ -76,33 +76,15 @@ catkin_make
 
 ## Test the Policy
 
-Pre-trained weights are available at `YOPO/saved/YOPO_1/epoch50.pth`.
-
-**1. Start the Controller and Dynamics Simulator**
-
-See [Controller README](Controller/src/readme.md) for details.
+Pre-trained weights (see [Releases](https://github.com/TJU-Aerial-Robotics/YOPO/releases)) use `--pretrained`:
 ```
-cd Controller
-source devel/setup.bash
-roslaunch so3_quadrotor_simulator simulator_attitude_control.launch
+uv run yopo train --pretrained=1 --trial=1 --epoch=50
 ```
+At inference the lowest-cost primitive is selected from 15 candidates produced by a single network forward pass. See `uv run yopo visualize --help` for dataset inspection.
 
-**2. Start the Environment and Sensors Simulator**
+Configurable via [traj_opt.yaml](YOPO/config/traj_opt.yaml).
 
-See [Simulator README](Simulator/src/readme.md) for details. Configure sensor and environment via [config.yaml](Simulator/src/config/config.yaml).
-```
-cd Simulator
-source devel/setup.bash
-rosrun sensor_simulator sensor_simulator_cuda
-```
-
-**3. Start the YOPO Planner**
-
-Configure flight speed in [traj_opt.yaml](YOPO/config/traj_opt.yaml). Pre-trained weights are at 6 m/s (0–6 m/s range). More models at [Releases](https://github.com/TJU-Aerial-Robotics/YOPO/releases).
-
-```
-uv run yopo train --trial=1 --epoch=50
-```
+See [Controller README](Controller/src/readme.md) and [Simulator README](Simulator/src/readme.md) for ROS launch and simulation details.
 
 **4. Visualization**
 
@@ -149,12 +131,9 @@ uv run tensorboard --logdir=./saved
     <img src="docs/train_log.png" alt="train_log" width="100%"/>
 </p>
 
-Configure trajectory optimization in [traj_opt.yaml](YOPO/config/traj_opt.yaml).
-
-
 ## TensorRT Deployment
 
-TensorRT inference: ~1 ms (ResNet-14) to ~5 ms (ResNet-18) on NVIDIA Orin NX.
+TensorRT inference: ~5 ms (ResNet-18) on NVIDIA Orin NX.
 
 **1. Install TensorRT Tools**
 ```
@@ -174,7 +153,7 @@ See `uv run yopo trt --help` and the [Controller README](Controller/src/readme.m
 
 ## RKNN Deployment
 
-Experimental: RK3566 (~20 ms with ResNet-14, INT8 quantization). RK3566/RK3588 guide coming soon.
+Experimental. See [GitHub Issues](https://github.com/TJU-Aerial-Robotics/YOPO/issues) for status.
 
 ## Citation
 

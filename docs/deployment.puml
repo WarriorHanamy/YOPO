@@ -1,0 +1,64 @@
+@startuml
+!theme plain
+skinparam nodeStyle rectangle
+
+node "Host PC (x86_64 + NVIDIA GPU)" as HOST {
+  frame "CLI / Makefile" {
+    [make data] as MAKE_DATA
+    [yopo train] as YOPO_TRAIN_LOCAL
+    [yopo deploy run] as YOPO_DEPLOY
+    [yopo trt] as YOPO_TRT
+  }
+
+  frame "Docker Engine" {
+    component "yopo-data-gen:latest\n(CUDA 单机)" as DG_CONT
+    component "yopo-train:latest\n(uv + CUDA + 数据生成)" as T_CONT
+  }
+
+  file "./dataset/" as DSET_LOCAL
+  file "./YOPO/saved/" as SAVED_LOCAL
+  file "./deploy.yaml" as DEPLOY_YAML
+}
+
+node "远程训练服务器\n(user@10.0.0.5)" as REMOTE {
+  folder "/data/yopo/dataset" as DSET_REMOTE
+  folder "/data/yopo/saved" as SAVED_REMOTE
+  folder "/data/yopo/configs" as CFG_REMOTE
+
+  component "yopo-train:latest\n(后台容器)" as T_CONT_REMOTE
+}
+
+node "Jetson Orin NX" as ORIN {
+  frame "ROS 控制器" {
+    [network_control_node] as ORIN_CTRL
+    [HGDO] as HGDO2
+  }
+  [MAVROS (PX4)] as PX4
+}
+
+node "RK3566\n(机载协处理器，实验性)" as RK {
+  [sensor_simulator (CPU)] as RK_SIM
+  [dataset_generator] as RK_DGEN
+}
+
+HOST --> REMOTE : SSH / SCP (部署管线)
+HOST --> DG_CONT : docker build + run
+HOST --> T_CONT : docker build + run (本地训练)
+T_CONT_REMOTE --> DSET_REMOTE : /app/dataset/data
+T_CONT_REMOTE --> SAVED_REMOTE : /app/YOPO/saved
+T_CONT_REMOTE --> CFG_REMOTE : /app/configs
+ORIN_CTRL --> PX4 : mavros (AttitudeTarget)
+ORIN_CTRL --> RK_SIM : ROS topics (仿真模式)
+
+@enduml
+```
+
+**Source anchors:**
+- `deploy.yaml` — Remote target (user@10.0.0.5), volume paths, image spec
+- `YOPO/schema.py` — RemoteTarget, DockerImageSpec, DeployConfig
+- `Makefile` — `make data` 管线用于数据生成 Docker
+- `YOPO/cli.py` — cmd_deploy_run (4 阶段管线), cmd_data_gen, cmd_docker_build, cmd_trt
+- `docker/data-gen/Dockerfile` — CUDA 12.4.1, nvidia/cuda 基础镜像
+- `docker/train/Dockerfile` — 多阶段：数据生成构建器 + uv 训练环境
+- `docker/train/entrypoint.sh` — 自动数据集生成，`uv run yopo "$@"`
+- `Controller/src/so3_control/launch/controller_network.launch` — 将 topic 重新映射到 /vins_estimator/imu_propagate (Orin VIO)

@@ -1,0 +1,118 @@
+@startuml
+!theme plain
+skinparam nodeStyle rectangle
+
+' ====================
+' DATA GENERATION
+' ====================
+
+frame "A) 离线数据生成" {
+  entity "config.yaml\n(env_num=10, image_num=10000,\nrandom_map=true)" as DG_CFG
+  entity "Maps::generate()\n(perlin3D/maze/forest/room/wall)" as MAPS
+  entity "GridMap (CUDA)\nGPU 占用栅格" as GRID
+  entity "dataset_generator\n(env_num x image_num 循环)" as DG_MAIN
+  entity "CUDA Kernels\ncameraRaycastKernel" as CUDA_RAY
+
+  database "pointcloud-{i}.ply\n(过滤体素栅格)" as PLY
+  database "pose-{i}.csv\n(px,py,pz,qw,qx,qy,qz)" as CSV
+  database "{i}/*.png\n(16位 uint16 深度图)" as DEPTH_PNG
+
+  DG_CFG --> MAPS : 环境参数
+  DG_CFG --> DG_MAIN : 传感器 + 数据集参数
+  MAPS --> GRID : 点云 -> 占用栅格
+  MAPS --> PLY : 保存过滤后的 PLY
+  DG_MAIN --> GRID : 随机姿态, 偏航/横滚/俯仰
+  DG_MAIN --> CUDA_RAY : T_wc SE3 姿态
+  GRID --> CUDA_RAY : GPU 占用栅格
+  CUDA_RAY --> DG_MAIN : float 深度缓冲区
+  DG_MAIN --> DEPTH_PNG : 保存深度 PNG
+  DG_MAIN --> CSV : 追加姿态行
+}
+
+' ====================
+' TRAINING
+' ====================
+
+frame "B) 训练管线" {
+  database "dataset/data/" as DSET_ROOT
+  entity "YOPODataset\n(PyTorch Dataset)" as DSET
+  entity "DataLoader\n(batch_size=16)" as LOADER
+  entity "YopoTrainer" as TRAIN2
+
+  entity "YopoNetwork" as NET2
+  entity "ResNet18 Backbone\n(1ch->64)" as BACK
+  entity "YopoHead\n(3x 1x1 conv)\nendstate(9) + score(1)" as HEAD2
+  entity "StateTransform\n(归一化 + 帧变换)" as SXFORM2
+  entity "LatticePrimitive\n(5Hx3V=15 primitives)" as LATTICE2
+
+  entity "YOPOLoss" as LOSS2
+  entity "ESDF Maps\n(GPU CuPy / CPU scipy)" as ESDF2
+
+  entity "epoch{N}.pth\n(checkpoint)" as CKPT
+  entity "TensorBoard / WandB" as LOGGING
+
+  DSET_ROOT --> DSET : 扫描 ply + csv + png
+  DSET --> LOADER : (img, pos, rot, random_obs, map_id)
+  LOADER --> TRAIN2 : batch
+
+  TRAIN2 --> NET2 : forward
+  NET2 --> BACK : depth [B,1,96,160]
+  NET2 --> HEAD : concat(obs, depth_feat)
+  NET2 --> SXFORM2 : 归一化 + pred_to_endstate
+  SXFORM2 --> LATTICE2 : 锚点方向
+
+  TRAIN2 --> LOSS2 : start_state_w, end_state_w, goal_w, map_id
+  LOSS2 --> ESDF2 : 在轨迹评估点查询 SDF
+
+  TRAIN2 --> CKPT : torch.save
+  TRAIN2 --> LOGGING : add_scalar / wandb.log
+}
+
+' ====================
+' ROS RUNTIME
+' ====================
+
+frame "C) ROS 运行时 (控制器 + 仿真器)" {
+  entity "quadrotor_simulator_so3\n(1000 Hz 动力学)" as QUAD_SIM2
+  entity "sensor_simulator\n(33 Hz 深度, 10 Hz 激光雷达)" as SENS_SIM2
+
+  entity "/sim/odom\n(nav_msgs/Odometry)" as TOP_ODOM
+  entity "/sim/imu\n(sensor_msgs/Imu)" as TOP_IMU
+  entity "/depth_image\n(sensor_msgs/Image)" as TOP_DEPTH
+  entity "/position_cmd\n(PositionCommand)" as TOP_POSCMD
+  entity "/so3_cmd\n(SO3Command)" as TOP_SO3
+
+  entity "NetworkControl" as CTRL_NODE
+  entity "HGDO\n(扰动观测器)" as HGDO2
+  entity "MAVROS I/F\n-> /mavros/setpoint_raw/attitude" as MAVROS2
+
+  QUAD_SIM2 --> TOP_ODOM : 以 100 Hz 发布 odom
+  QUAD_SIM2 --> TOP_IMU : 以 1000 Hz 发布 imu
+  QUAD_SIM2 <-- TOP_SO3 : 订阅 SO3Command
+  SENS_SIM2 <-- TOP_ODOM : 订阅 odom
+  SENS_SIM2 --> TOP_DEPTH : 发布深度图
+
+  CTRL_NODE <-- TOP_ODOM : odom_callback (pos, vel, att)
+  CTRL_NODE <-- TOP_IMU : imu_callback (acceleration)
+  CTRL_NODE <-- TOP_POSCMD : network_cmd_callback
+  CTRL_NODE --> TOP_SO3 : 发布 SO3Command
+  CTRL_NODE --> HGDO2 : velocity + last_des_acc -> dis_acc
+  CTRL_NODE --> MAVROS2 : AttitudeTarget (q, thrust)
+}
+
+@enduml
+```
+
+**Source anchors:**
+- `docker/data-gen/src/dataset_generator.cpp` — 主数据生成循环，CUDA 光线投射调用
+- `docker/data-gen/src/sensor_simulator.cu` — CUDA 相机/激光雷达光线投射内核
+- `docker/data-gen/include/sensor_simulator.cuh` — GridMap GPU 占用 + 对称索引
+- `YOPO/policy/yopo_dataset.py` — YOPODataset 读取 .png 深度 + .csv 姿态 + .ply 点云
+- `YOPO/policy/yopo_network.py` — YopoNetwork forward: depth -> 骨干网络, obs -> concat -> head
+- `YOPO/policy/yopo_trainer.py` — 训练循环: batch -> forward -> loss -> backward
+- `YOPO/loss/safety_loss.py` — SafetyLoss 懒加载 PLY -> ESDF 地图
+- `YOPO/loss/esdf_gpu.py` — compute_esdf GPU/CPU 回退
+- `Controller/src/so3_quadrotor_simulator/src/quadrotor_simulator_so3.cpp` — SO3 四旋翼仿真
+- `Controller/src/so3_control/src/NetworkControl.cpp` — odom_callback / timerCallback / network_cmd_callback
+- `Controller/src/so3_control/launch/controller_network.launch` — Topic 重映射
+- `Simulator/src/config/config.yaml` — Topic 名称、管道参数

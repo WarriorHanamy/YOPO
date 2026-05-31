@@ -1,0 +1,120 @@
+@startuml
+!theme plain
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+
+package "YOPO (Python)" {
+  [cli.py] as CLI
+  [schema.py] as SCHEMA
+
+  package "policy" {
+    [YopoNetwork] as NET
+    [YopoTrainer] as TRAIN
+    [YOPODataset] as DSET
+    [LatticePrimitive] as LATTICE
+    [StateTransform] as SXFORM
+
+    package "models" {
+      [ResNet18 / YopoBackbone] as BACKBONE
+      [YopoHead] as HEAD
+    }
+  }
+
+  package "loss" {
+    [YOPOLoss] as LOSS_MAIN
+    [SmoothnessLoss] as SMOOTH
+    [GuidanceLoss] as GUIDE
+    [SafetyLoss] as SAFE
+    [compute_esdf (GPU/CPU)] as ESDF
+  }
+
+  [config/traj_opt.yaml] as YAML_CFG
+}
+
+package "Controller (ROS)" {
+  component "so3_quadrotor_simulator" as QUAD_SIM {
+    [quadrotor_simulator_so3] as QUAD_SIM_NODE
+    [Quadrotor (dynamics)] as QUAD_DYN
+  }
+
+  component "so3_control" as SO3_CTRL {
+    [network_control_node] as NET_CTRL_NODE
+    [SO3ControlNodelet] as SO3_NODELET
+    [SO3Control (geometric PD)] as SO3_ALGO
+    [HGDO] as HGDO
+    [NetworkControl] as NET_CTRL
+  }
+}
+
+package "Simulator (ROS/CUDA)" {
+  [sensor_simulator (CPU)] as SENS_SIM_CPU
+  [sensor_simulator_cuda] as SENS_SIM_CUDA
+  [CUDA raycast kernels] as CUDA_KERN
+  [Maps (procedural env)] as MAP_GEN
+}
+
+package "docker/data-gen (no ROS)" as DG {
+  [dataset_generator] as DG_BIN
+  [CUDA raycast kernels] as DG_CUDA
+  [Maps (procedural)] as DG_MAPS
+}
+
+' Dependencies
+CLI --> SCHEMA
+CLI --> TRAIN : cmd_train / cmd_sweep
+CLI --> NET : cmd_trt
+CLI --> DSET : cmd_visualize
+
+TRAIN --> NET : constructs & trains
+TRAIN --> DSET : dataloaders
+TRAIN --> LOSS_MAIN : compute loss
+
+NET --> BACKBONE : depth feature
+NET --> HEAD : concat obs+img -> endstate+score
+NET --> SXFORM : normalise / denormalise
+
+SXFORM --> LATTICE : primitive grid
+
+LOSS_MAIN --> SMOOTH : jerk & acc QP
+LOSS_MAIN --> GUIDE : goal similarity
+LOSS_MAIN --> SAFE : ESDF collision cost
+SAFE --> ESDF : GPU / CPU EDT
+
+NET_CTRL_NODE --> NET_CTRL
+NET_CTRL --> SO3_ALGO : calculateControl
+NET_CTRL --> HGDO : disturbance estimation
+
+SO3_NODELET --> SO3_ALGO
+
+QUAD_SIM_NODE --> QUAD_DYN : step(dt)
+
+SENS_SIM_CUDA --> CUDA_KERN
+SENS_SIM_CUDA --> MAP_GEN
+
+DG_BIN --> DG_CUDA
+DG_BIN --> DG_MAPS
+
+@enduml
+```
+
+**Source anchors:**
+- `YOPO/cli.py` — CLI entry, all cmd_* functions
+- `YOPO/schema.py` — YOPOConfig, DeployConfig, DatasetManifest
+- `YOPO/policy/yopo_network.py` — YopoNetwork.forward()
+- `YOPO/policy/yopo_trainer.py` — YopoTrainer (train / eval loop)
+- `YOPO/policy/yopo_dataset.py` — YOPODataset (PyTorch Dataset)
+- `YOPO/policy/primitive.py` — LatticePrimitive, LatticeParam
+- `YOPO/policy/state_transform.py` — StateTransform
+- `YOPO/policy/models/backbone.py` — ResNet18 的单通道深度包装器
+- `YOPO/policy/models/head.py` — YopoHead (三层 1x1 卷积)
+- `YOPO/loss/loss_function.py` — YOPOLoss (平滑度 + 安全性 + 引导 + 加速度)
+- `YOPO/loss/esdf_gpu.py` — GPU/CPU EDT 回退
+- `Controller/src/so3_control/src/network_control_node.cpp` — network_ctrl_node 入口
+- `Controller/src/so3_control/src/NetworkControl.cpp` — NetworkControl (odom, cmd, 起降逻辑)
+- `Controller/src/so3_control/src/SO3Control.cpp` — SO3Control (PD + 几何控制)
+- `Controller/src/so3_control/include/so3_control/HGDO.h` — HGDO 扰动观测器
+- `Controller/src/so3_quadrotor_simulator/src/quadrotor_simulator_so3.cpp` — SO3 四旋翼仿真节点
+- `Simulator/src/src/test_simulator_cuda.cpp` — 传感器仿真器 CUDA 节点主函数
+- `Simulator/src/include/maps.hpp` — 过程化环境生成
+- `docker/data-gen/src/dataset_generator.cpp` — 离线数据集生成器入口
+- `docker/data-gen/Dockerfile` — 数据生成的两阶段 Dockerfile
