@@ -54,7 +54,6 @@ YOPO/
 ├── docs/                  # Media assets (GIFs, PNGs) for README — no text docs
 ├── PrimitivesAnalysis.md  # Deep technical analysis (541 lines)
 ├── AGENTS.md              # Durable agent rules (workspace layout, conventions, safety)
-├── Makefile               # Docker-based data generation orchestration
 ├── pyproject.toml         # Python project metadata + deps (uv/pip)
 ├── README.md              # Project overview + install/test/train instructions
 └── LICENSE                # MIT
@@ -276,7 +275,6 @@ At inference, the 15 primitives are ranked by predicted score; the lowest-score 
 | Config Reference | `YOPO/config/traj_opt.yaml` | All hyperparameters with inline comments |
 | Simulator Config | `Simulator/src/config/config.yaml` | Sensor and environment parameters |
 | Python Project | `pyproject.toml` | Dependencies, entry points, lint/format rules, pytest config |
-| Makefile | `Makefile` | Docker image/data generation targets |
 | License | `LICENSE` | MIT |
 
 ### Known Documentation Gaps

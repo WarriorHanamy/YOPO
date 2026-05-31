@@ -129,7 +129,7 @@ You can click the `2D Nav Goal` on RVIZ as the goal (the map is infinite so the 
 
 Generate dataset via Docker (requires NVIDIA GPU). Collects ~100,000 samples in 1–2 minutes:
 ```
-make data
+yopo data-gen
 ```
 Data is saved to `./dataset/data/`. Configure via [config.yaml](docker/data-gen/config/config.yaml).
 

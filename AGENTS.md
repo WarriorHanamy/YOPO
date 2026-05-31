@@ -36,7 +36,7 @@
 
 - **Python**: Use `uv sync` for deps, `uv run yopo <cmd>` for execution.
 - **ROS builds**: `catkin_make` in `Controller/` and `Simulator/` separately.
-- **Data generation**: `make data` (builds Docker image + runs with `--gpus all`).
+- **Data generation**: `yopo data-gen` (builds Docker image + runs with `--gpus all`).
 - **Pre-commit**: Run `pre-commit install` after `uv sync`.
 
 ## Code Style (enforced by pre-commit)

@@ -38,7 +38,7 @@
 | Path         | `dataset/data/` (local), `{RemoteTarget.dataset_path}/` (remote)   |
 | Schema       | `DatasetManifest`                                                  |
 | Contents     | `pointcloud-{0..N-1}.ply`, `pose-{0..N-1}.csv`, `{0..N-1}/img_*.png` |
-| Created by   | `yopo data-gen` or `make data` (Docker `dataset_generator`)        |
+| Created by   | `yopo data-gen` (Docker `dataset_generator`)                      |
 | Mount        | `-v {host}:{container}`: host `→ /output` in data-gen, `→ /app/dataset/data` in train |
 | Lifecycle    | Generated once, cached across deployments (volume mount)           |
 | Constraint   | Must exist before training; entrypoint checks `.ply` files          |
