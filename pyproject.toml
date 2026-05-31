@@ -20,6 +20,8 @@ dependencies = [
   "scikit-learn",
   "pydantic>=2",
 ]
+# Optional GPU acceleration for ESDF building:
+#   pip install cupy-cuda12x
 
 # pip install -U nvidia-tensorrt --index-url https://pypi.ngc.nvidia.com
 # pip install https://github.com/NVIDIA-AI-IOT/torch2trt (for `yopo trt`)

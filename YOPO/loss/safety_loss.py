@@ -9,6 +9,9 @@ import torch.nn.functional as F
 from scipy.ndimage import distance_transform_edt
 
 from ..schema import config
+from .esdf_gpu import _CUPY_AVAILABLE, compute_esdf
+
+_GPU_EDT_AVAILABLE = _CUPY_AVAILABLE
 
 
 class SafetyLoss(nn.Module):
@@ -230,22 +233,26 @@ class SafetyLoss(nn.Module):
             occupancy = np.zeros(sdf_shape, dtype=np.uint8)
             occupancy[tuple(voxel_indices.T)] = 1
 
-            obstacle_mask = occupancy == 1
-            free_mask = occupancy == 0
+            if _GPU_EDT_AVAILABLE:
+                dist_to_obstacle = compute_esdf(occupancy, self.voxel_size, self.device)
+                sdf_tensor = dist_to_obstacle.unsqueeze(0).unsqueeze(0).permute(0, 1, 4, 3, 2)
+            else:
+                obstacle_mask = occupancy == 1
+                free_mask = occupancy == 0
 
-            dist_to_obstacle = distance_transform_edt(free_mask) * self.voxel_size
-            dist_inside_obstacle = distance_transform_edt(obstacle_mask) * self.voxel_size
+                dist_to_obstacle = distance_transform_edt(free_mask) * self.voxel_size
+                dist_inside_obstacle = distance_transform_edt(obstacle_mask) * self.voxel_size
 
-            dist_to_obstacle[obstacle_mask] = -dist_inside_obstacle[obstacle_mask]
+                dist_to_obstacle[obstacle_mask] = -dist_inside_obstacle[obstacle_mask]
 
-            sdf_tensor = (
-                th.from_numpy(dist_to_obstacle)
-                .float()
-                .unsqueeze(0)
-                .unsqueeze(0)
-                .permute(0, 1, 4, 3, 2)
-                .to(self.device)
-            )
+                sdf_tensor = (
+                    th.from_numpy(dist_to_obstacle)
+                    .float()
+                    .unsqueeze(0)
+                    .unsqueeze(0)
+                    .permute(0, 1, 4, 3, 2)
+                    .to(self.device)
+                )
 
             sdf_maps.append(sdf_tensor)
             sdf_shapes.append(sdf_tensor.shape[-3:][::-1])
