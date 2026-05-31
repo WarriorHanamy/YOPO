@@ -33,6 +33,7 @@ class YopoTrainer:
         use_wandb=False,
         wandb_project='yopo',
         wandb_name=None,
+        saved_subdir=None,
     ):
         self.batch_size = batch_size
         self.max_grad_norm = 0.1
@@ -42,7 +43,11 @@ class YopoTrainer:
             self._exit_func = atexit.register(self.save_model)
         # logger
         self.progress_log = Progress()
-        self.tensorboard_path = self._get_next_log_path(tensorboard_path)
+        if saved_subdir:
+            self.tensorboard_path = os.path.join(tensorboard_path, saved_subdir)
+            os.makedirs(self.tensorboard_path, exist_ok=False)
+        else:
+            self.tensorboard_path = self._get_next_log_path(tensorboard_path)
         self.tensorboard_log = SummaryWriter(log_dir=self.tensorboard_path)
         self._use_wandb = use_wandb
         self._wandb = None

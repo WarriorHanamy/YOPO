@@ -1,0 +1,21 @@
+# YOPO deployment pipeline configuration
+# Usage: yopo deploy run --config deploy.yaml
+
+image:
+  tag: yopo-train:latest
+  tar_path: yopo-train.tar
+
+remote:
+  host: user@10.0.0.5
+  port: 22
+  dataset_path: /data/yopo/dataset
+  saved_path: /data/yopo/saved
+  configs_path: /data/yopo/configs
+
+sweep_config_dir: sweep_configs/
+epochs: 50
+batch_size: 16
+lr: 0.00015
+skip_build: false
+skip_image_send: false
+skip_configs_send: false

@@ -349,6 +349,76 @@ class YOPOConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Deploy / pipeline models
+# ---------------------------------------------------------------------------
+
+
+class DockerImageSpec(BaseModel):
+    """Docker image artifact specification.
+
+    Describes a built Docker image and its exported tar archive.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    tag: str = Field('yopo-train:latest', description='Docker image name:tag')
+    tar_path: Path = Field(Path('yopo-train.tar'), description='Exported tar file path')
+
+
+class RemoteTarget(BaseModel):
+    """Remote server connection and volume mount paths.
+
+    Describes the offline training server: SSH endpoint and persistent
+    storage locations for dataset, checkpoints, and sweep configs.
+    """
+
+    host: str = Field(..., description='SSH host (user@ip or ip)')
+    port: int = Field(22, ge=1, le=65535, description='SSH port')
+    dataset_path: str = Field('/data/yopo/dataset', description='Remote dataset volume path')
+    saved_path: str = Field('/data/yopo/saved', description='Remote checkpoint output path')
+    configs_path: str = Field('/data/yopo/configs', description='Remote sweep config path')
+
+
+class DeployConfig(BaseModel):
+    """Full deployment pipeline configuration, loadable from YAML.
+
+    Drives the ``yopo deploy run`` command: build image, send to remote,
+    launch training, and gather results.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    image: DockerImageSpec = Field(default_factory=DockerImageSpec)
+    remote: RemoteTarget
+    sweep_config_dir: Path = Field(..., description='Local directory with sweep YAML files')
+    epochs: int = Field(50, ge=1)
+    batch_size: int = Field(16, ge=1)
+    lr: float = Field(1.5e-4, gt=0, description='Learning rate')
+    skip_build: bool = Field(False, description='Skip docker build phase')
+    skip_image_send: bool = Field(False, description='Skip image scp + docker load')
+    skip_configs_send: bool = Field(False, description='Skip config scp phase')
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> DeployConfig:
+        """Load pipeline config from a nested YAML file.
+
+        Relative paths (sweep_config_dir) are resolved against the
+        directory containing the YAML file.
+        """
+        path = Path(path)
+        if not path.is_absolute():
+            path = path.resolve()
+        data = _yaml.load(path.read_text())
+        cfg = cls.model_validate(data)
+        cfg_dir = path.parent
+        if not cfg.sweep_config_dir.is_absolute():
+            cfg.sweep_config_dir = (cfg_dir / cfg.sweep_config_dir).resolve()
+        if not cfg.image.tar_path.is_absolute():
+            cfg.image.tar_path = (cfg_dir / cfg.image.tar_path).resolve()
+        return cfg
+
+
+# ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
 

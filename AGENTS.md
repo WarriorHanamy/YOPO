@@ -59,3 +59,7 @@
 - Specific command examples → `README.md` or CLI `--help`
 - Package version numbers → `pyproject.toml`
 - ROS topic names / message types → launch files and `CODEBASE.md`
+
+## Artifact Contracts
+
+All I/O artifacts (dataset, checkpoints, Docker images, deploy configs) are documented in [docs/artifacts.md](docs/artifacts.md). Corresponding Pydantic schemas live in `YOPO/schema.py`. When adding or modifying pipeline artifacts, update both files.

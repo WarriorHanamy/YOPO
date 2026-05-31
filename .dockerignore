@@ -1,18 +1,23 @@
-# Docker build context: only Simulator/src/ and docker/ are needed
-YOPO/
+# Docker build context: used by training image (root) and data-gen image (docker/data-gen/)
+# The data-gen build uses docker/data-gen/ as its own context, so these rules
+# primarily affect the training image build from the project root.
+
 Controller/
-hardware/
-docs/
+Simulator/
 dataset/
+docs/
+hardware/
 .git/
-.gitignore
-README.md
-LICENSE
-*.rst
-*.md
-*.gif
-*.png
-*.jpg
+.github/
+.pytest_cache/
+.ruff_cache/
+.venv/
+wandb/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
 
 # ROS catkin build artifacts
 Simulator/build/
@@ -21,7 +26,12 @@ Simulator/logs/
 Simulator/.catkin_workspace
 Simulator/.catkin_tools/
 
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
+# Misc
+.gitignore
+.gitmodules
+LICENSE
+*.rst
+*.md
+*.gif
+*.png
+*.jpg
