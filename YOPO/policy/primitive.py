@@ -43,8 +43,8 @@ class LatticePrimitive(LatticeParam):
 
     _instance = None
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, train: bool = True):
+        super().__init__(train=train)
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         if self.horizon_num == 1:
@@ -84,20 +84,18 @@ class LatticePrimitive(LatticeParam):
 
                     lattice_pos_list.append(pos_node)
                     lattice_angle_list.append(torch.tensor([alpha, beta]))
-                    Rotation = R.from_euler(
-                        'ZYX', [alpha, -beta, 0.0], degrees=False
-                    )  # inner rotation: yaw-pitch-roll
+                    Rotation = R.from_euler('ZYX', [alpha, -beta, 0.0], degrees=False)
                     lattice_Rbp_list.append(torch.tensor(Rotation.as_matrix()))
 
         self.lattice_pos_node = torch.stack(lattice_pos_list).to(
             dtype=torch.float32, device=device
-        )  # shape: [N, 3]
+        )
         self.lattice_angle_node = torch.stack(lattice_angle_list).to(
             dtype=torch.float32, device=device
-        )  # shape: [N, 2]
+        )
         self.lattice_Rbp_node = torch.stack(lattice_Rbp_list).to(
             dtype=torch.float32, device=device
-        )  # shape: [N, 3, 3]
+        )
 
         self.yaw_diff = 0.5 * self.horizon_anchor_fov / 180.0 * torch.pi
         self.pitch_diff = 0.5 * self.vertical_anchor_fov / 180.0 * torch.pi
@@ -110,9 +108,9 @@ class LatticePrimitive(LatticeParam):
 
     def getAngleLattice(self, id=None):
         if id is not None:
-            return self.lattice_angle_node[id, 0], self.lattice_angle_node[id, 1]  # yaw, pitch
+            return self.lattice_angle_node[id, 0], self.lattice_angle_node[id, 1]
         else:
-            return self.lattice_angle_node[:, 0], self.lattice_angle_node[:, 1]  # yaw, pitch
+            return self.lattice_angle_node[:, 0], self.lattice_angle_node[:, 1]
 
     def getRotation(self, id=None):
         if id is not None:
@@ -120,7 +118,7 @@ class LatticePrimitive(LatticeParam):
         else:
             return self.lattice_Rbp_node
 
-    def convert_ImageGrid_LatticeID(self, id):
+    def _convert_ImageGrid_LatticeID(self, id):
         return self.traj_num - id - 1
 
     @classmethod

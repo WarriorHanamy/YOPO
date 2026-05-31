@@ -28,7 +28,7 @@ def _load_config(yaml_config: str | None) -> YOPOConfig:
 
 
 def cmd_train(args: argparse.Namespace) -> None:
-    from YOPO.policy.yopo_trainer import YopoTrainer
+    from YOPO.policy import YopoTrainer
 
     cfg = _load_config(args.yaml_config)
     configure_random_seed(0)
@@ -58,7 +58,7 @@ def cmd_trt(args: argparse.Namespace) -> None:
     import numpy as np
     import torch
 
-    from YOPO.policy.yopo_network import YopoNetwork
+    from YOPO.policy import YopoNetwork
 
     try:
         from torch2trt import torch2trt
@@ -118,11 +118,11 @@ def cmd_trt(args: argparse.Namespace) -> None:
 
 
 def cmd_visualize(args: argparse.Namespace) -> None:
-    from YOPO.policy.yopo_dataset import YOPODataset
+    from YOPO.policy import YOPODataset
 
     _load_config(args.yaml_config)
     dataset = YOPODataset()
-    dataset.plot_sample_distribution()
+    dataset._plot_sample_distribution()
 
 
 def cmd_validate(args: argparse.Namespace) -> None:
@@ -154,7 +154,6 @@ def cmd_validate(args: argparse.Namespace) -> None:
     print(f'  image dirs: {len(manifest.image_dirs)}')
     print(f'  pose files: {len(manifest.poses)} (.csv)')
 
-    # Verify each map has a corresponding pose and image directory
     for i in range(manifest.num_maps):
         ok = all(
             [

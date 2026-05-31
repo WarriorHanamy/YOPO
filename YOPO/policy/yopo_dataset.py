@@ -14,10 +14,8 @@ from ..schema import config
 class YOPODataset(Dataset):
     def __init__(self, mode='train', val_ratio=0.1):
         super().__init__()
-        # image params
         self.height = int(config.dataset.image_height)
         self.width = int(config.dataset.image_width)
-        # ramdom state: x-direction: log-normal distribution, yz-direction: normal distribution
         self.vel_max = config.vel_max_train
         self.acc_max = config.acc_max_train
         self.vx_lognorm_mean = np.log(1 - config.sampling.vx_mean_unit)
@@ -54,9 +52,8 @@ class YOPODataset(Dataset):
         self.goal_pitch_std = config.sampling.goal_pitch_std
         self.goal_yaw_std = config.sampling.goal_yaw_std
         if mode == 'train':
-            self.print_data()
+            self._print_data()
 
-        # dataset
         data_dir = config.dataset.resolved
         self.img_list, self.map_idx, self.positions, self.quaternions = (
             [],
@@ -83,10 +80,10 @@ class YOPODataset(Dataset):
             ]
             image_file_names.sort(
                 key=lambda x: int(os.path.basename(x).split('.')[0].split('_')[1])
-            )  # sort by filename to align with the label
+            )
 
             states = np.loadtxt(
-                data_dir + f'/pose-{data_idx}.csv', delimiter=',', skiprows=1
+                data_dir / f'pose-{data_idx}.csv', delimiter=',', skiprows=1
             ).astype(np.float32)
             positions = states[:, 0:3]
             quaternions = states[:, 3:7]
@@ -140,7 +137,7 @@ class YOPODataset(Dataset):
 
     def __getitem__(self, item):
         # 1. read the image
-        # NOTE: The depth images are normalized from 0–20m to a 0–1 and converted to int16 during data collection.
+        # NOTE: The depth images are normalized from 0-20m to a 0-1 and converted to int16 during data collection.
         image = cv2.imread(self.img_list[item], -1).astype(np.float32)
         image = np.expand_dims(
             cv2.resize(image, (self.width, self.height), interpolation=cv2.INTER_NEAREST)
@@ -164,10 +161,7 @@ class YOPODataset(Dataset):
         goal_b = R_Bw.apply(goal_w)
 
         random_obs = np.hstack((vel_b, acc_b, goal_b)).astype(np.float32)
-        rot_wb = R_WB.as_matrix().astype(
-            np.float32
-        )  # transform to rot_matrix in numpy is faster than using quat in pytorch
-        # vel & acc & goal are in body frame, NWU, and no-normalization
+        rot_wb = R_WB.as_matrix().astype(np.float32)
         return image, self.positions[item], rot_wb, random_obs, self.map_idx[item]
 
     def _get_random_state(self):
@@ -178,16 +172,14 @@ class YOPODataset(Dataset):
                 right_skewed_vx = self.vel_max * np.random.lognormal(
                     mean=self.vx_lognorm_mean, sigma=self.vx_logmorm_sigma, size=None
                 )
-                right_skewed_vx = (
-                    -right_skewed_vx + 1.2 * self.vel_max
-                )  # * 1.2 to ensure v_max can be sampled
+                right_skewed_vx = -right_skewed_vx + 1.2 * self.vel_max
             vel[0] = right_skewed_vx
-            if np.linalg.norm(vel) < 1.2 * self.vel_max:  # avoid outliers
+            if np.linalg.norm(vel) < 1.2 * self.vel_max:
                 break
 
         while True:
             acc = self.acc_max * (self.a_mean + self.a_std * np.random.randn(3))
-            if np.linalg.norm(acc) < 1.2 * self.acc_max:  # avoid outliers
+            if np.linalg.norm(acc) < 1.2 * self.acc_max:
                 break
         return vel, acc
 
@@ -205,16 +197,15 @@ class YOPODataset(Dataset):
                 np.sin(goal_pitch_angle),
             ]
         )
-        # 10% probability to generate a nearby goal (× goal_length is actual length)
         random_near = np.random.rand()
         if random_near < 0.1:
             goal_w_dir = random_near * 10 * goal_w_dir
         return self.goal_length * goal_w_dir
 
-    def print_data(self):
+    def _print_data(self):
         import scipy.stats as stats
 
-        # 计算Vx 5% ~ 95% 区间
+        # Compute Vx 5% ~ 95% interval
         p5 = self.vel_max * np.exp(
             stats.norm.ppf(0.05, loc=self.vx_lognorm_mean, scale=self.vx_logmorm_sigma)
         )
@@ -247,10 +238,9 @@ class YOPODataset(Dataset):
         )
         print('-----------------------------------------------------')
 
-    def plot_sample_distribution(self):
+    def _plot_sample_distribution(self):
         import matplotlib.pyplot as plt
 
-        # ===== 采样 =====
         N = 10000
         goals = np.array([self._get_random_goal() for _ in range(N)])
         states = np.array([self._get_random_state() for _ in range(N)])
@@ -258,12 +248,11 @@ class YOPODataset(Dataset):
         accs = np.stack([s[1] for s in states])
 
         x, y, z = goals[:, 0], goals[:, 1], goals[:, 2]
-        yaw = np.degrees(np.arctan2(y, x))  # 水平角 [-180, 180]
-        pitch = np.degrees(np.arctan2(z, np.sqrt(x**2 + y**2)))  # 垂直角 [-90, 90]
+        yaw = np.degrees(np.arctan2(y, x))  # horizontal angle [-180, 180]
+        pitch = np.degrees(np.arctan2(z, np.sqrt(x**2 + y**2)))  # vertical angle [-90, 90]
 
         fig, axs = plt.subplots(3, 3, figsize=(15, 10))
 
-        # Goal方向角分布
         axs[0, 0].hist(yaw, bins=180)
         axs[0, 0].set_title('Goal Yaw Distribution')
         axs[0, 0].set_xlabel('Yaw (deg)')
@@ -276,7 +265,6 @@ class YOPODataset(Dataset):
         axs[0, 1].set_xlim([-60, 60])
         axs[0, 1].grid(True)
 
-        # Goal往图像投影分布(未考虑机体旋转)
         axs[0, 2].scatter(yaw, pitch, s=2, alpha=0.3)
         axs[0, 2].set_title('Goal Distribution in Image')
         axs[0, 2].set_xlabel('Yaw (deg)')
@@ -285,13 +273,11 @@ class YOPODataset(Dataset):
         axs[0, 2].set_ylim([-30, 30])
         axs[0, 2].grid(True)
 
-        # Velocity分布
         for i, name in enumerate(['Vx', 'Vy', 'Vz']):
             axs[1, i].hist(vels[:, i], bins=100)
             axs[1, i].set_title(f'Velocity {name}')
             axs[1, i].grid(True)
 
-        # Acceleration分布
         for i, name in enumerate(['Ax', 'Ay', 'Az']):
             axs[2, i].hist(accs[:, i], bins=100)
             axs[2, i].set_title(f'Acceleration {name}')
@@ -302,20 +288,18 @@ class YOPODataset(Dataset):
 
 
 if __name__ == '__main__':
-    # plot the random sample
     dataset = YOPODataset()
-    dataset.plot_sample_distribution()
+    dataset._plot_sample_distribution()
 
-    # select the best num_workers
     max_workers = os.cpu_count()
-    print(f'\n✅ cpu_count = {max_workers}')
+    print(f'cpu_count = {max_workers}')
 
     results = []
     for nw in range(0, max_workers + 1):
         data_loader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=nw)
         start = time.time()
         for i, _ in enumerate(data_loader):
-            if i > 50:  # 只测前50个batch
+            if i > 50:  # only test first 50 batches
                 break
         torch.cuda.synchronize() if torch.cuda.is_available() else None
         elapsed = time.time() - start
@@ -323,4 +307,4 @@ if __name__ == '__main__':
         print(f'num_workers={nw}: {elapsed:.3f}s')
 
     best = min(results, key=lambda x: x[1])
-    print(f'\n✅ 最优 num_workers = {best[0]}, 平均耗时={best[1]:.3f}s')
+    print(f'Best num_workers = {best[0]}, avg time = {best[1]:.3f}s')

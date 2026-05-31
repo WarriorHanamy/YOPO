@@ -20,11 +20,11 @@ class YOPOLoss(nn.Module):
         super().__init__()
         self.sgm_time = config.sgm_time
         self.device = th.device('cuda' if th.cuda.is_available() else 'cpu')
-        self._C, self._B, self._L, self._RJ, self._RA = self.qp_generation()
+        self._C, self._B, self._L, self._RJ, self._RA = self._qp_generation()
         self._RJ = self._RJ.to(self.device)
         self._RA = self._RA.to(self.device)
         self._L = self._L.to(self.device)
-        self.denormalize_weight()
+        self._denormalize_weight()
         self.smoothness_loss = SmoothnessLoss(self._RJ, self._RA)
         self.safety_loss = SafetyLoss(self._L)
         self.goal_loss = GuidanceLoss()
@@ -34,8 +34,8 @@ class YOPOLoss(nn.Module):
         print(f'| {"goal":<12} = {self.goal_weight:6.4f} |')
         print('-------------------------')
 
-    def qp_generation(self):
-        # 论文中的映射矩阵
+    def _qp_generation(self):
+        # Mapping matrices
         A = th.zeros((6, 6))
         for i in range(3):
             A[2 * i, i] = math.factorial(i)
@@ -44,7 +44,7 @@ class YOPOLoss(nn.Module):
                     math.factorial(j) / math.factorial(j - i) * (self.sgm_time ** (j - i))
                 )
 
-        # H海森矩阵，对应Jerk
+        # H: Hessian matrix for jerk
         H = th.zeros((6, 6))
         for i in range(3, 6):
             for j in range(3, 6):
@@ -59,7 +59,7 @@ class YOPOLoss(nn.Module):
                     * (self.sgm_time ** (i + j - 5))
                 )
 
-        # Q海森矩阵，对应Accel
+        # Q: Hessian matrix for acceleration
         Q = th.zeros((6, 6))
         for i in range(2, 6):
             for j in range(2, 6):
@@ -67,9 +67,9 @@ class YOPOLoss(nn.Module):
                     (i * (i - 1)) * (j * (j - 1)) / (i + j - 3) * (self.sgm_time ** (i + j - 3))
                 )
 
-        return self.stack_opt_dep(A, H, Q)
+        return self._stack_opt_dep(A, H, Q)
 
-    def stack_opt_dep(self, A, H, Q):
+    def _stack_opt_dep(self, A, H, Q):
         Ct = th.zeros((6, 6))
         Ct[[0, 2, 4, 1, 3, 5], [0, 1, 2, 3, 4, 5]] = 1
 
@@ -87,11 +87,11 @@ class YOPOLoss(nn.Module):
 
         return _C, B, _L, _R_Jerk, _R_Acc
 
-    def denormalize_weight(self):
+    def _denormalize_weight(self):
         """
         Denormalize the cost weight to ensure consistency across different speeds to simplify parameter tuning.
-        smoothness cost: time integral of jerk² is used as a smoothness cost.
-                         If the speed is scaled by n, the cost is scaled by n⁵ (because jerk * n⁶ and time * 1/n).
+        smoothness cost: time integral of jerk squared is used as a smoothness cost.
+                         If the speed is scaled by n, the cost is scaled by n^5 (because jerk * n^6 and time * 1/n).
         safety cost:     time integral of the distance from trajectory to obstacles.
                          If the speed is scaled by n, the cost is scaled by 1/n (because time * 1/n).
         goal cost:       projection of the trajectory onto goal direction.
@@ -106,17 +106,15 @@ class YOPOLoss(nn.Module):
     def forward(self, state, prediction, goal, map_id):
         """
         Args:
-            prediction: (batch_size, 3, 3) → [px, py, pz; vx, vy, vz; ax, ay, az] in world frame
-            state: (batch_size, 3, 3) → [px, py, pz; vx, vy, vz; ax, ay, az] in world frame
+            prediction: (batch_size, 3, 3) -> [px, py, pz; vx, vy, vz; ax, ay, az] in world frame
+            state: (batch_size, 3, 3) -> [px, py, pz; vx, vy, vz; ax, ay, az] in world frame
             map_id: (batch_size) which ESDF map to query
 
         Returns:
-            cost: (batch_size) → weighted cost
+            cost: (batch_size) -> weighted cost
         """
-        # Fixed part: initial pos, vel, acc → (batch_size, 3, 3) [px, vx, ax; py, vy, ay; pz, vz, az]
         Df = state.permute(0, 2, 1)
 
-        # Decision parameters (local frame) → (batch_size, 3, 3) [px, vx, ax; py, vy, ay; pz, vz, az]
         Dp = prediction.permute(0, 2, 1)
 
         smoothness_cost, acceleration_cost = self.smoothness_loss(Df, Dp)

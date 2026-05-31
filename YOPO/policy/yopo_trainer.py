@@ -14,7 +14,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
 
-from ..loss.loss_function import YOPOLoss
+from ..loss import YOPOLoss
 from ..schema import config
 from .state_transform import state_body2world
 from .yopo_dataset import YOPODataset
@@ -42,7 +42,7 @@ class YopoTrainer:
             self._exit_func = atexit.register(self.save_model)
         # logger
         self.progress_log = Progress()
-        self.tensorboard_path = self.get_next_log_path(tensorboard_path)
+        self.tensorboard_path = self._get_next_log_path(tensorboard_path)
         self.tensorboard_log = SummaryWriter(log_dir=self.tensorboard_path)
         self._use_wandb = use_wandb
         self._wandb = None
@@ -77,7 +77,7 @@ class YopoTrainer:
         self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=learning_rate, fused=True)
         print('Network Loaded! Loading Dataset...')
 
-        # dataset (you can adjust num_workers according to your training speed)
+        # dataset
         self.train_dataloader = DataLoader(
             YOPODataset(mode='train'),
             batch_size=self.batch_size,
@@ -99,9 +99,9 @@ class YopoTrainer:
             total_progress = self.progress_log.add_task('Training', total=epoch)
             for self.epoch_i in range(epoch):
                 self.policy.train()
-                self.train_one_epoch(self.epoch_i, total_progress)
+                self._train_one_epoch(self.epoch_i, total_progress)
                 self.policy.eval()
-                self.eval_one_epoch(self.epoch_i)
+                self._eval_one_epoch(self.epoch_i)
                 if save_interval is not None and (self.epoch_i + 1) % save_interval == 0:
                     self.progress_log.console.log('Saving model...')
                     policy_path = self.tensorboard_path + f'/epoch{self.epoch_i + 1}.pth'
@@ -111,7 +111,7 @@ class YopoTrainer:
             if self._wandb:
                 self._wandb.finish()
 
-    def train_one_epoch(self, epoch: int, total_progress):
+    def _train_one_epoch(self, epoch: int, total_progress):
         one_epoch_progress = self.progress_log.add_task(
             f'Epoch: {epoch}', total=len(self.train_dataloader)
         )
@@ -125,11 +125,9 @@ class YopoTrainer:
             acc_losses,
             start_time,
         ) = [], [], [], [], [], [], time.time()
-        for step, (depth, pos, rot, obs_b, map_id) in enumerate(
-            self.train_dataloader
-        ):  # obs: body frame
+        for step, (depth, pos, rot, obs_b, map_id) in enumerate(self.train_dataloader):
             if depth.shape[0] != self.batch_size:
-                continue  # batch size == number of env
+                continue
 
             self.optimizer.zero_grad()
 
@@ -140,11 +138,10 @@ class YopoTrainer:
                 safety_cost,
                 goal_cost,
                 acc_cost,
-            ) = self.forward_and_compute_loss(depth, pos, rot, obs_b, map_id)
+            ) = self._forward_and_compute_loss(depth, pos, rot, obs_b, map_id)
 
             loss = self.loss_weight[0] * trajectory_loss + self.loss_weight[1] * score_loss
 
-            # Optimize the policy
             loss.backward()
             self.optimizer.step()
 
@@ -222,18 +219,16 @@ class YopoTrainer:
         self.progress_log.remove_task(one_epoch_progress)
 
     @torch.inference_mode()
-    def eval_one_epoch(self, epoch: int):
+    def _eval_one_epoch(self, epoch: int):
         one_epoch_progress = self.progress_log.add_task(
             f'Eval: {epoch}', total=len(self.val_dataloader)
         )
         traj_losses, score_losses = [], []
-        for step, (depth, pos, rot, obs_b, map_id) in enumerate(
-            self.val_dataloader
-        ):  # obs: body frame
+        for step, (depth, pos, rot, obs_b, map_id) in enumerate(self.val_dataloader):
             if depth.shape[0] != self.batch_size:
-                continue  # batch size == num of env
+                continue
 
-            trajectory_loss, score_loss, _, _, _, _ = self.forward_and_compute_loss(
+            trajectory_loss, score_loss, _, _, _, _ = self._forward_and_compute_loss(
                 depth, pos, rot, obs_b, map_id
             )
 
@@ -256,30 +251,26 @@ class YopoTrainer:
             )
         self.progress_log.remove_task(one_epoch_progress)
 
-    def forward_and_compute_loss(self, depth, pos, rot, obs_b, map_id):
+    def _forward_and_compute_loss(self, depth, pos, rot, obs_b, map_id):
         depth, pos, rot, obs_b, map_id = [
             x.to(self.device) for x in [depth, pos, rot, obs_b, map_id]
         ]
 
-        # 1. pre-process
         goal_w, start_vel_w, start_acc_w = state_body2world(
             pos, rot, obs_b[:, 6:9], obs_b[:, 0:3], obs_b[:, 3:6]
         )
         start_state_w = torch.stack([pos, start_vel_w, start_acc_w], dim=1)
 
-        # 2. forward propagation
         endstate, score = self.policy.inference(depth, obs_b)
 
-        # 3. post-process [B, V, H, 9] -> [B*V*H, 9]
         endstate_flat = endstate.permute(0, 2, 3, 1).reshape(self.batch_size * self.traj_num, 9)
         score_flat = score.reshape(self.batch_size * self.traj_num)
 
-        pos_expanded = pos.repeat_interleave(self.traj_num, dim=0)  # [B*V*H, 3]
-        rot_expanded = rot.repeat_interleave(self.traj_num, dim=0)  # [B*V*H, 3, 3]
-        start_state_w = start_state_w.repeat_interleave(self.traj_num, dim=0)  # [B*V*H, 3, 3]
-        goal_w = goal_w.repeat_interleave(self.traj_num, dim=0)  # [B*V*H, 3]
+        pos_expanded = pos.repeat_interleave(self.traj_num, dim=0)
+        rot_expanded = rot.repeat_interleave(self.traj_num, dim=0)
+        start_state_w = start_state_w.repeat_interleave(self.traj_num, dim=0)
+        goal_w = goal_w.repeat_interleave(self.traj_num, dim=0)
 
-        # [B*V*H, 3] [B*V*H, 3] [B*V*H, 3]
         end_pos_w, end_vel_w, end_acc_w = state_body2world(
             pos_expanded,
             rot_expanded,
@@ -287,7 +278,6 @@ class YopoTrainer:
             endstate_flat[:, 3:6],
             endstate_flat[:, 6:9],
         )
-        # [B*V*H, 3, 3]: [px, py, pz; vx, vy, vz; ax, ay, az]
         end_state_w = torch.stack([end_pos_w, end_vel_w, end_acc_w], dim=1)
 
         smooth_cost, safety_cost, goal_cost, acc_cost = self.yopo_loss(
@@ -313,7 +303,7 @@ class YopoTrainer:
             torch.save(self.policy.state_dict(), policy_path)
             atexit.unregister(self._exit_func)
 
-    def get_next_log_path(self, base_path):
+    def _get_next_log_path(self, base_path):
         nums = [
             int(name.split('_')[1])
             for name in os.listdir(base_path)

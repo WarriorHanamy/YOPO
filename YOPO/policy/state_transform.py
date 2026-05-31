@@ -10,18 +10,17 @@ class StateTransform:
         self.lattice_primitive = LatticePrimitive.get_instance()
         self.goal_length = config.goal_length
 
-    def pred_to_endstate(self, endstate_pred: torch.Tensor) -> torch.Tensor:
+    def _pred_to_endstate(self, endstate_pred: torch.Tensor) -> torch.Tensor:
         """
-        Transform the predicted state to the body frame (Original prediction → Primitive frame → Body frame).
+        Transform the predicted state to the body frame (Original prediction -> Primitive frame -> Body frame).
         endstate_pred: [batch; px py pz vx vy vz ax ay az; primitive_v; primitive_h]
         :return [batch; px py pz vx vy vz ax ay az; primitive_v; primitive_h] in body frame
         """
         B, V, H = endstate_pred.shape[0], endstate_pred.shape[2], endstate_pred.shape[3]
 
-        # [B, 9, 3, 5] -> [B, 3, 5, 9] -> [B, 15, 9]
         endstate_pred = endstate_pred.permute(0, 2, 3, 1).reshape(B, V * H, 9)
 
-        # 获取 lattice angle 和 rotation (.flip: 由于lattice和grid的顺序相反)
+        # Get lattice angle and rotation (.flip: lattice and grid order are reversed)
         yaw, pitch = self.lattice_primitive.getAngleLattice()  # [15]
         yaw = yaw.flip(0)[None, :].expand(B, -1)  # [B, 15]
         pitch = pitch.flip(0)[None, :].expand(B, -1)  # [B, 15]
@@ -38,11 +37,9 @@ class StateTransform:
         endstate_z = torch.sin(pitch + delta_pitch) * radio
         endstate_p = torch.stack([endstate_x, endstate_y, endstate_z], dim=-1)  # [B, 15, 3]
 
-        # vel / acc
         endstate_vp = endstate_pred[:, :, 3:6] * self.lattice_primitive.vel_max  # [B, 15, 3]
         endstate_ap = endstate_pred[:, :, 6:9] * self.lattice_primitive.acc_max  # [B, 15, 3]
 
-        # v/a 变换到 body frame
         endstate_vb = torch.matmul(Rbp, endstate_vp.unsqueeze(-1)).squeeze(-1)  # [B, 15, 3]
         endstate_ab = torch.matmul(Rbp, endstate_ap.unsqueeze(-1)).squeeze(-1)
 
@@ -51,12 +48,12 @@ class StateTransform:
         endstate = endstate.permute(0, 2, 1).reshape(B, 9, V, H)  # [B, 9, 3, 5]
         return endstate
 
-    def pred_to_endstate_cpu(
+    def _pred_to_endstate_cpu(
         self, endstate_pred: np.ndarray, lattice_id: torch.Tensor
     ) -> np.ndarray:
         """
         Used during test:
-        Numpy version of pred_to_endstate() on CPU (used in test, x10 times faster than torch on CUDA)
+        Numpy version of _pred_to_endstate() on CPU (used in test, x10 times faster than torch on CUDA)
         :return [B; px py pz vx vy vz ax ay az] in body frame
         """
         delta_yaw = endstate_pred[:, 0] * self.lattice_primitive.yaw_diff
@@ -81,32 +78,32 @@ class StateTransform:
 
     def prepare_input(self, obs):
         """
-        Transform the observation to the primitive frame (Body frame → Primitive frame → Body frame).
+        Transform the observation to the primitive frame (Body frame -> Primitive frame -> Body frame).
         obs: [batch; vx, vy, yz, ax, ay, az, gx, gy, gz] in body frame
         :return [batch; vx, vy, yz, ax, ay, az, gx, gy, gz; primitive_v; primitive_h] in primitive frame
         """
         B, N = obs.shape[0], self.lattice_primitive.traj_num
 
-        # 获取所有 Rbp 并倒序排列 (由于lattice和grid的顺序相反)
-        Rbp_all = self.lattice_primitive.getRotation().flip(0)  # shape: [N, 3, 3]
+        # Get all Rbp and reverse order (lattice and grid order are reversed)
+        Rbp_all = self.lattice_primitive.getRotation().flip(0)
 
-        obs = obs.view(B, 3, 3)  # [B, 3, 3]
+        obs = obs.view(B, 3, 3)
 
-        # 扩展 obs 和 Rbp 到 [B, N, 3, 3]
+        # Expand obs and Rbp to [B, N, 3, 3]
         obs_exp = obs[:, None, :, :].expand(B, N, 3, 3)
         Rbp_exp = Rbp_all[None, :, :, :].expand(B, N, 3, 3)
 
-        # 执行批量坐标变换
-        transformed = torch.matmul(obs_exp, Rbp_exp)  # [B, N, 3, 3]
+        # Batch coordinate transformation
+        transformed = torch.matmul(obs_exp, Rbp_exp)
 
-        transformed_flat = transformed.view(B, N, 9)  # [B, N, 9]
-        out = transformed_flat.permute(0, 2, 1).contiguous()  # [B, 9, N]
+        transformed_flat = transformed.view(B, N, 9)
+        out = transformed_flat.permute(0, 2, 1).contiguous()
         out = out.view(
             B,
             9,
             self.lattice_primitive.vertical_num,
             self.lattice_primitive.horizon_num,
-        )  # [B, 9, V, H]
+        )
         return out
 
     def unnormalize_obs(self, vel_acc):
@@ -118,7 +115,6 @@ class StateTransform:
         vel_acc_goal[:, 0:3] = vel_acc_goal[:, 0:3] / self.lattice_primitive.vel_max
         vel_acc_goal[:, 3:6] = vel_acc_goal[:, 3:6] / self.lattice_primitive.acc_max
 
-        # Clamp the goal direction to unit length
         goal_norm = vel_acc_goal[:, 6:9].norm(dim=1, keepdim=True)
         vel_acc_goal[:, 6:9] = vel_acc_goal[:, 6:9] / goal_norm.clamp(min=self.goal_length)
         return vel_acc_goal

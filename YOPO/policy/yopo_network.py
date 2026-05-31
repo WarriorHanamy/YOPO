@@ -14,8 +14,8 @@ from .state_transform import StateTransform
 class YopoNetwork(nn.Module):
     def __init__(
         self,
-        observation_dim=9,  # 9: v_xyz, a_xyz, goal_xyz
-        output_dim=10,  # 10: x_pva, y_pva, z_pva, score
+        observation_dim=9,
+        output_dim=10,
         hidden_state=64,
     ):
         super().__init__()
@@ -34,8 +34,8 @@ class YopoNetwork(nn.Module):
         obs_feature = self.state_backbone(obs)
         input_tensor = torch.cat((obs_feature, depth_feature), 1)
         output = self.yopo_head(input_tensor)
-        endstate = torch.tanh(output[:, :9])  # [batch, 9, vertical_num, horizon_num]
-        score = torch.nn.functional.softplus(output[:, 9])  # [batch, vertical_num, horizon_num]
+        endstate = torch.tanh(output[:, :9])
+        score = torch.nn.functional.softplus(output[:, 9])
         return endstate, score
 
     def inference(self, depth: torch.Tensor, obs: torch.Tensor) -> torch.Tensor:
@@ -50,8 +50,8 @@ class YopoNetwork(nn.Module):
         obs = self.state_transform.normalize_obs(obs)
         obs = self.state_transform.prepare_input(obs)
         endstate_pred, score_pred = self.forward(depth, obs)
-        endstate = self.state_transform.pred_to_endstate(endstate_pred)
+        endstate = self.state_transform._pred_to_endstate(endstate_pred)
         return endstate, score_pred
 
-    def print_grad(self, grad):
+    def _print_grad(self, grad):
         print('grad of hook: ', grad)
