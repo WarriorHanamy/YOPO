@@ -1,7 +1,6 @@
-FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS yopo-trainer
+FROM ubuntu:22.04
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    libpcl-dev libopencv-dev libyaml-cpp-dev libomp-dev \
     software-properties-common \
     && add-apt-repository -y ppa:deadsnakes/ppa \
     && apt-get update \
