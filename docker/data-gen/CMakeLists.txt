@@ -8,6 +8,7 @@ set(CMAKE_BUILD_TYPE Release)
 
 set(CONFIG_FILE   "/app/config/config.yaml"  CACHE STRING "Runtime config file path")
 set(CUDA_ARCH     "86"                        CACHE STRING "CUDA SM architecture (75, 86, 89, 120, ...)")
+set(DATASET_GENERATOR_TARGET "dataset_generator" CACHE STRING "Dataset generator executable target")
 
 find_package(CUDA REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -37,18 +38,18 @@ include_directories(
 cuda_add_library(raycast_cuda src/sensor_simulator.cu)
 target_link_libraries(raycast_cuda ${CUDA_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
 
-add_executable(dataset_generator
+add_executable(${DATASET_GENERATOR_TARGET}
     src/dataset_generator.cpp
     src/maps.cpp
     src/perlinnoise.cpp
 )
-target_link_libraries(dataset_generator
+target_link_libraries(${DATASET_GENERATOR_TARGET}
     ${PCL_LIBRARIES}
     ${OpenCV_LIBRARIES}
     OpenMP::OpenMP_CXX
     raycast_cuda
     yaml-cpp
 )
-target_compile_definitions(dataset_generator PRIVATE
+target_compile_definitions(${DATASET_GENERATOR_TARGET} PRIVATE
     CONFIG_FILE_PATH="${CONFIG_FILE}"
 )

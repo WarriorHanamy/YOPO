@@ -117,4 +117,4 @@ DG_BIN --> DG_MAPS
 - `Simulator/src/src/test_simulator_cuda.cpp` — 传感器仿真器 CUDA 节点主函数
 - `Simulator/src/include/maps.hpp` — 过程化环境生成
 - `docker/data-gen/src/dataset_generator.cpp` — 离线数据集生成器入口
-- `docker/data-gen/Dockerfile` — 数据生成的两阶段 Dockerfile
+- `docker/data-gen/Dockerfile` — 数据生成 Dockerfile
