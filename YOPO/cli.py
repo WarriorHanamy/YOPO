@@ -8,7 +8,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-from YOPO.schema import DeployConfig, DockerImageSpec, RemoteTarget, YOPOConfig, config
+from YOPO.schema import (
+    DATA_GEN_IMAGE,
+    TRAINER_IMAGE,
+    DeployConfig,
+    DockerImageSpec,
+    RemoteTarget,
+    YOPOConfig,
+    config,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -116,17 +124,22 @@ def cmd_sweep(args: argparse.Namespace) -> None:
     print(f'Sweep complete ({len(yaml_files)} configs)')
 
 
+def _build_image(tag: str, dockerfile: Path, context: Path) -> None:
+    print(f'Building {tag}...')
+    subprocess.run(
+        ['docker', 'build', '-f', str(dockerfile), '-t', tag, str(context)],
+        check=True,
+    )
+    print(f'Image {tag} built successfully')
+
+
 def cmd_data_gen(args: argparse.Namespace) -> None:
-    image_tag = 'yopo-data-gen:latest'
+    image_tag = DATA_GEN_IMAGE.tag
     data_gen_dir = _PROJECT_ROOT / 'docker' / 'data-gen'
     output_dir = Path(args.output_dir).resolve()
 
     if not args.skip_build:
-        print(f'Building Docker image {image_tag}...')
-        subprocess.run(
-            ['docker', 'build', '-t', image_tag, str(data_gen_dir)],
-            check=True,
-        )
+        _build_image(image_tag, data_gen_dir / 'Dockerfile', data_gen_dir)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f'Generating dataset -> {output_dir}...')
@@ -147,19 +160,27 @@ def cmd_data_gen(args: argparse.Namespace) -> None:
 
 
 def cmd_docker_build(args: argparse.Namespace) -> None:
-    tag = args.tag or 'yopo-train:latest'
-    dockerfile = _PROJECT_ROOT / 'docker' / 'train' / 'Dockerfile'
-    print(f'Building {tag}...')
-    subprocess.run(
-        ['docker', 'build', '-f', str(dockerfile), '-t', tag, str(_PROJECT_ROOT)],
-        check=True,
-    )
-    print(f'Image {tag} built successfully')
+    images = args.image or ['train', 'data-gen']
+
+    if args.tag and len(images) > 1:
+        sys.exit('--tag can only be used when building a single image')
+
+    for name in images:
+        if name == 'train':
+            tag = args.tag or TRAINER_IMAGE.tag
+            dockerfile = _PROJECT_ROOT / 'docker' / 'train' / 'Dockerfile'
+            context = _PROJECT_ROOT
+        else:
+            tag = args.tag or DATA_GEN_IMAGE.tag
+            dockerfile = _PROJECT_ROOT / 'docker' / 'data-gen' / 'Dockerfile'
+            context = dockerfile.parent
+
+        _build_image(tag, dockerfile, context)
 
 
 def cmd_docker_export(args: argparse.Namespace) -> None:
-    tag = args.tag or 'yopo-train:latest'
-    output = args.output or 'yopo-train.tar'
+    tag = args.tag or TRAINER_IMAGE.tag
+    output = args.output or str(TRAINER_IMAGE.tar_path)
     print(f'Exporting {tag} -> {output}...')
     subprocess.run(
         ['docker', 'save', '-o', output, tag],
@@ -183,7 +204,7 @@ def cmd_docker_send(args: argparse.Namespace) -> None:
     subprocess.run(scp_cmd, check=True)
 
     if args.load:
-        tag = args.load_tag or 'yopo-train:latest'
+        tag = args.load_tag or TRAINER_IMAGE.tag
         remote_file = f'{args.remote_path.rstrip("/")}/{tar_path.name}'
         print(f'Loading image on {args.host}...')
         ssh_cmd = ['ssh']
@@ -226,28 +247,44 @@ def _scp_from_remote(remote: RemoteTarget, src: str, dst: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _phase_build_image(image: DockerImageSpec) -> None:
-    tag = image.tag
-    dockerfile = _PROJECT_ROOT / 'docker' / 'train' / 'Dockerfile'
-    print(f'[Phase 1/4] Build image: {tag}')
-    subprocess.run(
-        ['docker', 'build', '-f', str(dockerfile), '-t', tag, str(_PROJECT_ROOT)],
-        check=True,
+def _remote_has_image(remote: RemoteTarget, tag: str) -> bool:
+    """Check whether a Docker image tag already exists on the remote host."""
+    result = subprocess.run(
+        _ssh_command(remote, f'docker images -q {tag}'),
+        capture_output=True,
+        text=True,
     )
+    return bool(result.stdout.strip())
 
 
-def _phase_send_image(remote: RemoteTarget, image: DockerImageSpec) -> None:
-    tar = image.tar_path
-    if not tar.exists():
-        print(f'[Phase 2/4] Export image -> {tar}')
-        subprocess.run(['docker', 'save', '-o', str(tar), image.tag], check=True)
+def _phase_build_images(trainer: DockerImageSpec, data_gen: DockerImageSpec) -> None:
+    dockerfile_trainer = _PROJECT_ROOT / 'docker' / 'train' / 'Dockerfile'
+    dockerfile_data_gen = _PROJECT_ROOT / 'docker' / 'data-gen' / 'Dockerfile'
 
-    print(f'[Phase 2/4] Send image to {remote.host}')
-    subprocess.run(_scp_to_remote(remote, [str(tar)], '/tmp/'), check=True)
+    print('[Phase 1/4] Build trainer image')
+    _build_image(trainer.tag, dockerfile_trainer, _PROJECT_ROOT)
 
-    remote_tar = f'/tmp/{tar.name}'
-    print('[Phase 2/4] Load image on remote')
-    subprocess.run(_ssh_command(remote, f'docker load -i {remote_tar}'), check=True)
+    print('[Phase 1/4] Build data-gen image')
+    _build_image(data_gen.tag, dockerfile_data_gen, dockerfile_data_gen.parent)
+
+
+def _phase_send_images(remote: RemoteTarget, *images: DockerImageSpec) -> None:
+    for image in images:
+        if _remote_has_image(remote, image.tag):
+            print(f'[Phase 2/4] Skip {image.tag} (already on remote)')
+            continue
+
+        tar = image.tar_path
+        if not tar.exists():
+            print(f'[Phase 2/4] Export image -> {tar}')
+            subprocess.run(['docker', 'save', '-o', str(tar), image.tag], check=True)
+
+        print(f'[Phase 2/4] Send {tar} to {remote.host}')
+        subprocess.run(_scp_to_remote(remote, [str(tar)], '/tmp/'), check=True)
+
+        remote_tar = f'/tmp/{tar.name}'
+        print(f'[Phase 2/4] Load image on remote: {image.tag}')
+        subprocess.run(_ssh_command(remote, f'docker load -i {remote_tar}'), check=True)
 
 
 def _phase_send_configs(remote: RemoteTarget, sweep_config_dir: Path) -> None:
@@ -272,7 +309,7 @@ def _phase_launch_training(cfg: DeployConfig) -> str:
         f'-v {cfg.remote.dataset_path}:/app/dataset/data '
         f'-v {cfg.remote.saved_path}:/app/YOPO/saved '
         f'-v {cfg.remote.configs_path}:/app/configs '
-        f'{cfg.image.tag} '
+        f'{cfg.trainer_image.tag} '
         f'sweep --config-dir /app/configs --epochs {cfg.epochs} '
         f'--batch-size {cfg.batch_size} --lr {cfg.lr}'
     )
@@ -296,14 +333,14 @@ def cmd_deploy_run(args: argparse.Namespace) -> None:
     cfg = DeployConfig.from_yaml(args.config)
 
     if not cfg.skip_build:
-        _phase_build_image(cfg.image)
+        _phase_build_images(cfg.trainer_image, cfg.data_gen_image)
     else:
         print('[Phase 1/4] Build: SKIP (skip_build=true)')
 
     if not cfg.skip_image_send:
-        _phase_send_image(cfg.remote, cfg.image)
+        _phase_send_images(cfg.remote, cfg.trainer_image, cfg.data_gen_image)
     else:
-        print('[Phase 2/4] Send image: SKIP (skip_image_send=true)')
+        print('[Phase 2/4] Send images: SKIP (skip_image_send=true)')
 
     if not cfg.skip_configs_send:
         _phase_send_configs(cfg.remote, cfg.sweep_config_dir)
@@ -324,7 +361,7 @@ def cmd_deploy_status(args: argparse.Namespace) -> None:
     from YOPO.schema import DeployConfig
 
     cfg = DeployConfig.from_yaml(args.config)
-    tag = cfg.image.tag
+    tag = cfg.trainer_image.tag
 
     result = subprocess.run(
         _ssh_command(
@@ -373,7 +410,7 @@ def cmd_deploy_gather(args: argparse.Namespace) -> None:
     result = subprocess.run(
         _ssh_command(
             cfg.remote,
-            f'docker ps --filter ancestor={cfg.image.tag} -q',
+            f'docker ps --filter ancestor={cfg.trainer_image.tag} -q',
         ),
         capture_output=True,
         text=True,
@@ -581,22 +618,29 @@ def main() -> None:
     p_docker = sub.add_parser('docker', help='Docker image management')
     docker_sub = p_docker.add_subparsers(dest='docker_cmd', required=True)
 
-    p_dk_build = docker_sub.add_parser('build', help='Build yopo-train Docker image')
+    p_dk_build = docker_sub.add_parser('build', help='Build Docker images')
     p_dk_build.add_argument(
-        '--tag', type=str, default=None, help='Image tag (default: yopo-train:latest)'
+        'image',
+        nargs='*',
+        choices=['train', 'data-gen'],
+        default=None,
+        help='Images to build (default: train data-gen)',
+    )
+    p_dk_build.add_argument(
+        '--tag', type=str, default=None, help='Override image tag (single image only)'
     )
 
     p_dk_export = docker_sub.add_parser('export', help='Export image to tar')
     p_dk_export.add_argument('--tag', type=str, default=None)
-    p_dk_export.add_argument('-o', '--output', type=str, default='yopo-train.tar')
+    p_dk_export.add_argument('-o', '--output', type=str, default=str(TRAINER_IMAGE.tar_path))
 
     p_dk_send = docker_sub.add_parser('send', help='SCP tar to remote and optionally docker load')
     p_dk_send.add_argument('host', type=str, help='Remote host (user@ip)')
     p_dk_send.add_argument('--port', type=int, default=22)
-    p_dk_send.add_argument('--tar', type=str, default='yopo-train.tar')
+    p_dk_send.add_argument('--tar', type=str, default=str(TRAINER_IMAGE.tar_path))
     p_dk_send.add_argument('--remote-path', type=str, default='/tmp/')
     p_dk_send.add_argument('--load', action='store_true', help='docker load on remote after SCP')
-    p_dk_send.add_argument('--load-tag', type=str, default=None)
+    p_dk_send.add_argument('--load-tag', type=str, default=TRAINER_IMAGE.tag)
 
     # ---- deploy ----
     p_deploy = sub.add_parser('deploy', help='End-to-end deployment pipeline')

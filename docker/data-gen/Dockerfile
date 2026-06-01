@@ -26,7 +26,7 @@ RUN cmake -B /build -S /src -DCMAKE_BUILD_TYPE=Release \
   && cmake --build /build --target dataset_generator -j$(nproc)
 
 # ===== Stage 2: Runtime =====
-FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS yopo-data-generator
 ARG APT_MIRROR
 
 COPY setup-apt-mirror.sh /tmp/setup-apt-mirror.sh

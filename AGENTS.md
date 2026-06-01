@@ -5,6 +5,7 @@
 - `YOPO/`             — Python package (training + inference, PyTorch)
 - `Controller/`       — ROS catkin workspace (C++ SO(3) controller)
 - `Simulator/`        — ROS catkin workspace (C++/CUDA sensor simulator)
+- `docker/train/`    — Docker-based YOPO trainer image (Python 3.12, PyTorch)
 - `docker/data-gen/`  — Docker-based offline data generation (CUDA, no ROS)
 - `dataset/`          — Training data mount point (gitignored, never commit)
 - `docs/`             — Media assets (GIFs, PNGs) + architecture diagrams (PlantUML *.puml)
@@ -23,7 +24,7 @@
 - **Python version**: ==3.12 (per `pyproject.toml` and `uv.lock`). Do NOT assume 3.8.
 - **CUDA**: NOT guaranteed — always check `torch.cuda.is_available()` and fall back to CPU.
 - **ROS**: Noetic required for Controller and Simulator workspaces.
-- The `docker/data-gen/` container does NOT require ROS.
+- **Docker images**: `yopo/<role>:<tag>` — e.g., `yopo/trainer:latest`, `yopo/data-generator:latest`
 
 ## Safety Rules (NEVER do these)
 

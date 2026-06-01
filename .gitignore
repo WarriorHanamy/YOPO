@@ -13,8 +13,6 @@ YOPO/saved/*
 dataset/
 yopo_sim/
 
-!YOPO/saved/YOPO_1/
-
 __pycache__/
 *.pyc
 *.egg-info/

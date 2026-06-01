@@ -57,26 +57,46 @@
 
 ## Build Artifacts
 
-### Docker Image
+### Trainer Image
 
 | Field        | Value                                                              |
 | ------------ | ------------------------------------------------------------------ |
-| Tag          | `yopo-train:latest` (configurable)                                 |
+| Tag          | `yopo/trainer:latest` (configurable)                               |
 | Schema       | `DockerImageSpec`                                                  |
 | Built by     | `yopo docker build` or `yopo deploy run`                           |
-| Dockerfile   | `docker/train/Dockerfile` (multi-stage: data-gen + Python env)      |
+| Dockerfile   | `docker/train/Dockerfile` (pure Python 3.12 training env)          |
 | Context      | Project root                                                       |
-| Size         | ~6-8 GB                                                            |
+| Size         | ~4-5 GB                                                            |
 
-### Docker Image Tar
+### Trainer Image Tar
 
 | Field        | Value                                                              |
 | ------------ | ------------------------------------------------------------------ |
-| Path         | `yopo-train.tar` (configurable via `DockerImageSpec.tar_path`)      |
+| Path         | `yopo-trainer.tar` (configurable via `DockerImageSpec.tar_path`)   |
 | Schema       | `DockerImageSpec`                                                  |
 | Created by   | `docker save -o {tar_path} {tag}`                                  |
 | Transferred  | `scp` to remote, then `docker load -i`                             |
-| Lifecycle    | Build once → export → send → load on remote (idempotent)           |
+| Lifecycle    | Build once → export → send → load on remote (skipped if tag exists) |
+
+### Data Generator Image
+
+| Field        | Value                                                              |
+| ------------ | ------------------------------------------------------------------ |
+| Tag          | `yopo/data-generator:latest` (configurable)                        |
+| Schema       | `DockerImageSpec`                                                  |
+| Built by     | `yopo data-gen` or `yopo deploy run`                               |
+| Dockerfile   | `docker/data-gen/Dockerfile` (standalone C++/CUDA, no Python)      |
+| Context      | `docker/data-gen/`                                                 |
+| Size         | ~3-4 GB                                                            |
+
+### Data Generator Image Tar
+
+| Field        | Value                                                              |
+| ------------ | ------------------------------------------------------------------ |
+| Path         | `yopo-data-generator.tar` (configurable via `DockerImageSpec.tar_path`) |
+| Schema       | `DockerImageSpec`                                                  |
+| Created by   | `docker save -o {tar_path} {tag}`                                  |
+| Transferred  | `scp` to remote, then `docker load -i` (skipped if tag exists)      |
 
 ---
 
@@ -131,9 +151,12 @@
 
 Example:
 ```yaml
-image:
-  tag: yopo-train:latest
-  tar_path: yopo-train.tar
+trainer_image:
+  tag: yopo/trainer:latest
+  tar_path: yopo-trainer.tar
+data_gen_image:
+  tag: yopo/data-generator:latest
+  tar_path: yopo-data-generator.tar
 remote:
   host: user@10.0.0.5
   port: 22
@@ -176,18 +199,18 @@ lr: 0.00015
 ───────                  ───────
 deploy.yaml  ──────────▶ consumed by deploy commands
 sweep_configs/*.yaml ──▶ scp ──▶ /data/yopo/configs/
-yopo-train.tar ────────▶ scp ──▶ docker load
-                                          │
-                                          ▼
-                              docker run -d yopo-train
-                              ├─ dataset miss → generate
-                              ├─ dataset hit  → skip
-                              └─ sweep --config-dir /app/configs
-                                          │
-                                          ▼
-                              /data/yopo/saved/exp_*/
-                                          │
-                              scp ◀───────┘
-                                          │
-                              /local/results/exp_*/
+yopo-trainer.tar ──────▶ scp ──▶ docker load (if tag absent)
+yopo-data-generator.tar▶ scp ──▶ docker load (if tag absent)
+                                   │
+                                   ▼
+                       docker run -d yopo/trainer
+                       └─ dataset miss  → ERROR (run data-gen first)
+                       └─ dataset hit   → sweep --config-dir /app/configs
+                                   │
+                                   ▼
+                       /data/yopo/saved/exp_*/
+                                   │
+                       scp ◀───────┘
+                                   │
+                       /local/results/exp_*/
 ```

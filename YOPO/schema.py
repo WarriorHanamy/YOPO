@@ -361,8 +361,18 @@ class DockerImageSpec(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    tag: str = Field('yopo-train:latest', description='Docker image name:tag')
-    tar_path: Path = Field(Path('yopo-train.tar'), description='Exported tar file path')
+    tag: str = Field(..., description='Docker image name:tag')
+    tar_path: Path = Field(..., description='Exported tar file path')
+
+
+TRAINER_IMAGE = DockerImageSpec(
+    tag='yopo/trainer:latest',
+    tar_path=Path('yopo-trainer.tar'),
+)
+DATA_GEN_IMAGE = DockerImageSpec(
+    tag='yopo/data-generator:latest',
+    tar_path=Path('yopo-data-generator.tar'),
+)
 
 
 class RemoteTarget(BaseModel):
@@ -388,7 +398,18 @@ class DeployConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    image: DockerImageSpec = Field(default_factory=DockerImageSpec)
+    trainer_image: DockerImageSpec = Field(
+        default_factory=lambda: DockerImageSpec(
+            tag='yopo/trainer:latest',
+            tar_path=Path('yopo-trainer.tar'),
+        ),
+    )
+    data_gen_image: DockerImageSpec = Field(
+        default_factory=lambda: DockerImageSpec(
+            tag='yopo/data-generator:latest',
+            tar_path=Path('yopo-data-generator.tar'),
+        ),
+    )
     remote: RemoteTarget
     sweep_config_dir: Path = Field(..., description='Local directory with sweep YAML files')
     epochs: int = Field(50, ge=1)
@@ -413,8 +434,10 @@ class DeployConfig(BaseModel):
         cfg_dir = path.parent
         if not cfg.sweep_config_dir.is_absolute():
             cfg.sweep_config_dir = (cfg_dir / cfg.sweep_config_dir).resolve()
-        if not cfg.image.tar_path.is_absolute():
-            cfg.image.tar_path = (cfg_dir / cfg.image.tar_path).resolve()
+        if not cfg.trainer_image.tar_path.is_absolute():
+            cfg.trainer_image.tar_path = (cfg_dir / cfg.trainer_image.tar_path).resolve()
+        if not cfg.data_gen_image.tar_path.is_absolute():
+            cfg.data_gen_image.tar_path = (cfg_dir / cfg.data_gen_image.tar_path).resolve()
         return cfg
 
 
