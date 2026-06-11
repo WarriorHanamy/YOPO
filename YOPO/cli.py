@@ -18,6 +18,15 @@ from YOPO.schema import (
     config,
 )
 
+from YOPO.export import (
+    export_onnx,
+    export_torchscript,
+    export_trt,
+    generate_metadata,
+    generate_revision,
+    run_benchmark,
+)
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -501,6 +510,133 @@ def cmd_trt(args: argparse.Namespace) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# export helpers
+# ---------------------------------------------------------------------------
+
+_C5PRO_POLICIES = _PROJECT_ROOT / '_policies'
+
+
+def _default_export_dir() -> Path:
+    rev = generate_revision()
+    return (_C5PRO_POLICIES / rev).resolve()
+
+
+def _export_common(args, formats: list[str], *, benchmark: bool = False) -> None:
+    cfg = _load_config(args.yaml_config)
+    if args.yaml_config:
+        _apply_config_to_singleton(cfg)
+
+    output_dir = Path(args.output_dir) if args.output_dir else _default_export_dir()
+
+    if args.checkpoint:
+        cp = args.checkpoint
+    elif args.trial is not None:
+        cp = str(cfg.resolve_checkpoint_path(args.trial, args.epoch))
+    else:
+        sys.exit('Specify --trial/--epoch or --checkpoint to locate the model weights')
+
+    print(f'Export revision: {output_dir.name}')
+    print(f'  checkpoint: {cp}')
+    print(f'  output_dir: {output_dir}')
+
+    for fmt in formats:
+        if fmt == 'onnx':
+            export_onnx(cfg, cp, output_dir, opset=args.opset or 18)
+        elif fmt == 'torchscript':
+            export_torchscript(cfg, cp, output_dir)
+        elif fmt == 'trt':
+            try:
+                export_trt(cfg, cp, output_dir, fp16=not args.fp32)
+            except (ImportError, RuntimeError) as e:
+                print(f'  [SKIP] TensorRT: {e}')
+
+    # Generate metadata using the first requested format as primary
+    generate_metadata(cfg, output_dir, output_dir.name, formats)
+
+    # Run benchmark
+    if benchmark:
+        report = run_benchmark(
+            cfg,
+            output_dir,
+            checkpoint_path=cp,
+            warmup=args.warmup,
+            iterations=args.iterations,
+        )
+        report.print()
+
+
+def cmd_export_onnx(args: argparse.Namespace) -> None:
+    _export_common(args, ['onnx'])
+
+
+def cmd_export_torchscript(args: argparse.Namespace) -> None:
+    _export_common(args, ['torchscript'])
+
+
+def cmd_export_trt(args: argparse.Namespace) -> None:
+    _export_common(args, ['trt'])
+
+
+def cmd_export_all(args: argparse.Namespace) -> None:
+    _export_common(args, ['onnx', 'torchscript', 'trt'], benchmark=True)
+
+
+def _add_export_args(subparser: argparse.ArgumentParser) -> None:
+    _add_global_args(subparser)
+    subparser.add_argument(
+        '--trial',
+        type=int,
+        default=None,
+        help='Trial number for checkpoint path (YOPO_N/epochE.pth)',
+    )
+    subparser.add_argument(
+        '--epoch',
+        type=int,
+        default=50,
+        help='Epoch number for checkpoint path',
+    )
+    subparser.add_argument(
+        '--checkpoint',
+        type=str,
+        default=None,
+        help='Explicit checkpoint path (overrides --trial/--epoch)',
+    )
+    subparser.add_argument(
+        '-o',
+        '--output-dir',
+        type=str,
+        default=None,
+        help=f'Output directory (default: {_C5PRO_POLICIES}/<revision>)',
+    )
+
+
+def _add_export_benchmark_args(subparser: argparse.ArgumentParser) -> None:
+    subparser.add_argument(
+        '--warmup',
+        type=int,
+        default=100,
+        help='Warmup iterations before measurement (default: 100)',
+    )
+    subparser.add_argument(
+        '--iterations',
+        type=int,
+        default=500,
+        help='Measured iterations (default: 500)',
+    )
+    subparser.add_argument(
+        '--opset',
+        type=int,
+        default=18,
+        help='ONNX opset version (default: 18)',
+    )
+    subparser.add_argument(
+        '--fp32',
+        action='store_true',
+        help='Disable FP16 for TensorRT',
+    )
+
+
 def cmd_visualize(args: argparse.Namespace) -> None:
     from YOPO.policy import YOPODataset
 
@@ -668,6 +804,25 @@ def main() -> None:
     p_trt.add_argument('--epoch', type=int, default=50)
     p_trt.add_argument('--output', type=str, default='yopo_trt.pth', help='output file name')
 
+    # ---- export ----
+    p_export = sub.add_parser('export', help='Export trained policy for deployment')
+    export_sub = p_export.add_subparsers(dest='export_cmd', required=True)
+
+    p_ex_onnx = export_sub.add_parser('onnx', help='Export ONNX model + metadata')
+    _add_export_args(p_ex_onnx)
+    _add_export_benchmark_args(p_ex_onnx)
+
+    p_ex_ts = export_sub.add_parser('torchscript', help='Export TorchScript model + metadata')
+    _add_export_args(p_ex_ts)
+
+    p_ex_trt = export_sub.add_parser('trt', help='Export TensorRT engine + metadata')
+    _add_export_args(p_ex_trt)
+    _add_export_benchmark_args(p_ex_trt)
+
+    p_ex_all = export_sub.add_parser('all', help='Export ONNX + TorchScript + TRT + benchmark')
+    _add_export_args(p_ex_all)
+    _add_export_benchmark_args(p_ex_all)
+
     # ---- visualize ----
     p_vis = sub.add_parser('visualize', help='Plot dataset sampling distributions')
     _add_global_args(p_vis)
@@ -700,6 +855,15 @@ def main() -> None:
             cmd_deploy_gather(args)
     elif args.command == 'trt':
         cmd_trt(args)
+    elif args.command == 'export':
+        if args.export_cmd == 'onnx':
+            cmd_export_onnx(args)
+        elif args.export_cmd == 'torchscript':
+            cmd_export_torchscript(args)
+        elif args.export_cmd == 'trt':
+            cmd_export_trt(args)
+        elif args.export_cmd == 'all':
+            cmd_export_all(args)
     elif args.command == 'visualize':
         cmd_visualize(args)
     elif args.command == 'validate':

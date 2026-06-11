@@ -23,8 +23,12 @@ dependencies = [
 # Optional GPU acceleration for ESDF building:
 #   pip install cupy-cuda12x
 
+[project.optional-dependencies]
+onnx = ["onnx>=1.16", "onnxruntime>=1.18", "onnxscript>=0.1"]
+trt = []  # manual: nvidia-tensorrt (NGC) + torch2trt (GitHub)
+
 # pip install -U nvidia-tensorrt --index-url https://pypi.ngc.nvidia.com
-# pip install https://github.com/NVIDIA-AI-IOT/torch2trt (for `yopo trt`)
+# git clone https://github.com/NVIDIA-AI-IOT/torch2trt && cd torch2trt && python setup.py install
 
 [dependency-groups]
 dev = [

@@ -175,6 +175,48 @@ class TRTOutput(BaseModel):
     trt_file: Path
 
 
+class ExportManifest(BaseModel):
+    """Export artifact directory manifest.
+
+    Describes the contents produced by ``yopo export``, conforming to
+    ``c5pro.io/neural-policy/v1`` (see ``export/EXPORT_RULE.md``).
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    output_dir: Path = Field(..., description='Artifact root directory')
+    revision: str = Field(..., description='{YYYYMMDDTHHMMSSZ}-{commit8}')
+    formats: list[str] = Field(default_factory=lambda: ['onnx'], description='Exported formats')
+
+    @property
+    def model_spec_path(self) -> Path:
+        return self.output_dir / 'model_spec.yaml'
+
+    @property
+    def onnx_path(self) -> Path:
+        return self.output_dir / 'model.onnx'
+
+    @property
+    def torchscript_path(self) -> Path:
+        return self.output_dir / 'model.pt'
+
+    @property
+    def engine_path(self) -> Path:
+        return self.output_dir / 'model.engine'
+
+    def list_artifacts(self) -> list[Path]:
+        """Return all existing artifact files in the output directory."""
+        candidates = [
+            self.model_spec_path,
+            self.onnx_path,
+            self.torchscript_path,
+            self.engine_path,
+            self.output_dir / 'observations_metadata.yaml',
+            self.output_dir / 'action_metadata.yaml',
+        ]
+        return [p for p in candidates if p.exists()]
+
+
 # ---------------------------------------------------------------------------
 # Root config
 # ---------------------------------------------------------------------------
