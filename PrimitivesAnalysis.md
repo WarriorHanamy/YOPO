@@ -330,7 +330,7 @@ For `vel_max_train=6 m/s` and `radio_range=5 m`: `T = 2×5/6 ≈ 1.67 s`.
 │   For each primitive:                                            │
 │     start = (pos_w, vel_w, acc_w)         (world frame)         │
 │     end   = transform_body2world(endstate)                      │
-│     build BatchedPoly5Solver(start, end, T)                            │
+│     build BatchedQuinticPolySolver(start, end, T)                       │
 │                                                                 │
 │     C_smooth = ws × ∫jerk² dt + wa × ∫acc² dt                  │
 │              = ws × dᵀ·R_J·d + wa × dᵀ·R_A·d                    │
@@ -351,7 +351,7 @@ For `vel_max_train=6 m/s` and `radio_range=5 m`: `T = 2×5/6 ≈ 1.67 s`.
 │       → rotate to body frame (vel_b, acc_b, goal_b)             │
 │       → normalize → prepare_input → network forward             │
 │   7c. Select primitive with minimum score                       │
-│   7d. Build BatchedPoly5Solver for best primitive                      │
+│   7d. Build BatchedQuinticPolySolver for best primitive                 │
 │   7e. At each control tick (50 Hz, dt=0.02s):                   │
 │         evaluate p(t), v(t), a(t) at current t                 │
 │         compute yaw from velocity + goal direction              │
